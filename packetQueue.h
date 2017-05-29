@@ -36,7 +36,6 @@ int packet_queue_put(PacketQueue *q, AVPacket *pkt) {
   q->nb_packets++;
   q->size += pkt1->pkt.size;
   SDL_CondSignal(q->cond);
-  
   SDL_UnlockMutex(q->mutex);
   return 0;
 }
@@ -48,12 +47,11 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block)
   SDL_LockMutex(q->mutex);
   
   for(;;) {
-
     pkt1 = q->first_pkt;
     if (pkt1) {
       q->first_pkt = pkt1->next;
       if (!q->first_pkt)
-	q->last_pkt = NULL;
+          q->last_pkt = NULL;
       q->nb_packets--;
       q->size -= pkt1->pkt.size;
       *pkt = pkt1->pkt;

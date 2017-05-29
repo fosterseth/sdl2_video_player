@@ -164,25 +164,33 @@ void initiate_renderer_window(VideoState *vs){
 
 int displayFrame(VideoState *vs){
     /* decode video frame */
-    avcodec_decode_video2(vs->video_dec_ctx, vs->frame, &vs->got_frame, &vs->pkt);
-    if (vs->got_frame) {
-        vs->frame->pts = av_frame_get_best_effort_timestamp(vs->frame);
-        vs->frame->pts = av_rescale_q(vs->frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
-        printf("video_frame n:%d coded_n:%d pts:%d\n",
-               vs->video_frame_count++,
-               vs->frame->coded_picture_number,
-               vs->frame->pts);
-        SDL_UpdateYUVTexture(vs->Texture,
-                                NULL,
-                                vs->frame->data[0],
-                                vs->frame->linesize[0],
-                                vs->frame->data[1],
-                                vs->frame->linesize[1],
-                                vs->frame->data[2],
-                                vs->frame->linesize[2]);
-        SDL_RenderCopy(vs->Renderer, vs->Texture, NULL, NULL);
-        SDL_RenderPresent(vs->Renderer);
+    AVPacket pkt;
+    int gotframe;
+    AVFrame *frame;
+    frame = av_frame_alloc();
+    if (packet_queue_get(&vs->videoqueue, &pkt, 0)){
+        avcodec_decode_video2(vs->video_dec_ctx, frame, &gotframe, &vs->pkt);
+        if (gotframe) {
+            frame->pts = av_frame_get_best_effort_timestamp(frame);
+            frame->pts = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
+            printf("video_frame n:%d coded_n:%d pts:%d\n",
+                   vs->video_frame_count++,
+                   frame->coded_picture_number,
+                   frame->pts);
+            SDL_UpdateYUVTexture(vs->Texture,
+                                    NULL,
+                                    frame->data[0],
+                                    frame->linesize[0],
+                                    frame->data[1],
+                                    frame->linesize[1],
+                                    frame->data[2],
+                                    frame->linesize[2]);
+            SDL_RenderCopy(vs->Renderer, vs->Texture, NULL, NULL);
+            SDL_RenderPresent(vs->Renderer);
+        }
     }
+    av_packet_unref(&pkt);
+    av_free(frame);
 	return 0;
 }
 
@@ -204,6 +212,7 @@ int decode_packet(VideoState *vs){
             SDL_PauseAudioDevice(vs->dev, 0);
         }
     } else if (vs->pkt.stream_index == vs->video_stream_idx){
+        packet_queue_put(&vs->videoqueue, &vs->pkt);
         displayFrame(vs);
     }
 	
@@ -234,8 +243,11 @@ int decode_thread(void *arg){
 
 	// open audio device
 	initiate_audio_device(vs);
+    // open renderer window
     initiate_renderer_window(vs);
-
+    // initiate packetqueue
+    packet_queue_init(&vs->videoqueue);
+    
 	vs->frame = av_frame_alloc();
 	av_init_packet(&vs->pkt);
 	vs->pkt.data = NULL;
@@ -251,7 +263,7 @@ int decode_thread(void *arg){
             vs->pkt.data += ret;
             vs->pkt.size -= ret;
         } while (vs->pkt.size > 0);
-        av_packet_unref(&orig_pkt);
+//        av_packet_unref(&orig_pkt);
     }
     while(SDL_GetQueuedAudioSize(vs->dev) > 0){
         continue;
@@ -274,6 +286,7 @@ int main(int argc, char **argv){
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
 	
 	thread = SDL_CreateThread(decode_thread, "decoder", vs);
+//    decode_thread((void *) vs);
 
 	SDL_WaitThread(thread, &threadreturn);
 	SDL_Quit;
