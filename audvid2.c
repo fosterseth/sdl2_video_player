@@ -119,7 +119,7 @@ void initiate_audio_device(VideoState *vs){
 	SDL_zero(vs->want);
 	vs->want.freq = vs->audio_dec_ctx->sample_rate;
 	vs->want.format = AUDIO_F32SYS;
-	vs->want.channels = 1;
+	vs->want.channels = vs->audio_dec_ctx->channels;
 	vs->want.samples = 4096;
 	vs->dev = SDL_OpenAudioDevice(NULL, 0, &vs->want, &vs->have, 0);
 	SDL_PauseAudioDevice(vs->dev, 0);
@@ -162,6 +162,27 @@ void initiate_renderer_window(VideoState *vs){
 	SDL_RenderClear( vs->Renderer );
 }
 
+Uint32 callback_displayFrame(Uint32 interval, void *param)
+{
+    SDL_Event event;
+    SDL_UserEvent userevent;
+
+    /* In this example, our callback pushes an SDL_USEREVENT event
+    into the queue, and causes our callback to be called again at the
+    same interval: */
+
+    userevent.type = SDL_USEREVENT;
+    userevent.code = 0;
+    userevent.data1 = NULL;
+    userevent.data2 = NULL;
+
+    event.type = SDL_USEREVENT;
+    event.user = userevent;
+
+    SDL_PushEvent(&event);
+    return (interval);
+}
+
 int displayFrame(VideoState *vs){
     /* decode video frame */
     AVPacket pkt;
@@ -169,7 +190,7 @@ int displayFrame(VideoState *vs){
     AVFrame *frame;
     frame = av_frame_alloc();
     if (packet_queue_get(&vs->videoqueue, &pkt, 0)){
-        avcodec_decode_video2(vs->video_dec_ctx, frame, &gotframe, &vs->pkt);
+        avcodec_decode_video2(vs->video_dec_ctx, frame, &gotframe, &pkt);
         if (gotframe) {
             frame->pts = av_frame_get_best_effort_timestamp(frame);
             frame->pts = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
@@ -189,14 +210,24 @@ int displayFrame(VideoState *vs){
             SDL_RenderPresent(vs->Renderer);
         }
     }
-    av_packet_unref(&pkt);
-    av_free(frame);
+//    av_packet_unref(&pkt);
+//    av_free(frame);
 	return 0;
+}
+
+int displayFrame_thread(void *arg){
+    Uint32 delay = 0;
+    for (;;){
+        SDL_TimerID my_timer_id = SDL_AddTimer(delay + 1000, callback_displayFrame, NULL);
+        delay += 1000;
+    }
+    return 0;
 }
 
 int decode_packet(VideoState *vs){
     int decoded = vs->pkt.size;
     int ret = 0;
+//    if (0){
 	if (vs->pkt.stream_index == vs->audio_stream_idx){
 		ret = avcodec_decode_audio4(vs->audio_dec_ctx, vs->frame, &vs->got_frame, &vs->pkt);
         decoded = FFMIN(ret, vs->pkt.size);
@@ -208,12 +239,11 @@ int decode_packet(VideoState *vs){
                     SDL_GetQueuedAudioSize(vs->dev),
                     vs->frame->nb_samples,
                     vs->frame->pts);
-            SDL_QueueAudio(vs->dev, vs->frame->extended_data[0], unpadded_linesize);
-            SDL_PauseAudioDevice(vs->dev, 0);
+            uint_t membuf[
+            SDL_QueueAudio(vs->dev, vs->frame->data[0], unpadded_linesize*vs->audio_dec_ctx->channels);
         }
     } else if (vs->pkt.stream_index == vs->video_stream_idx){
         packet_queue_put(&vs->videoqueue, &vs->pkt);
-        displayFrame(vs);
     }
 	
 	if (vs->got_frame)
@@ -268,6 +298,8 @@ int decode_thread(void *arg){
     while(SDL_GetQueuedAudioSize(vs->dev) > 0){
         continue;
     }
+    while(vs->videoqueue.nb_packets > 0)
+        continue;
 
 	return 0;
 }
@@ -275,7 +307,9 @@ int decode_thread(void *arg){
 int main(int argc, char **argv){
 	VideoState *vs;
 	SDL_Thread *thread;
+    SDL_Thread *thread1;
 	int threadreturn;
+    int threadreturn1;
 
 	vs = av_mallocz(sizeof(VideoState));
 	
@@ -286,9 +320,26 @@ int main(int argc, char **argv){
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
 	
 	thread = SDL_CreateThread(decode_thread, "decoder", vs);
+    SDL_AddTimer(31, callback_displayFrame, NULL);
+    
+//    thread1 = SDL_CreateThread(displayFrame_thread, "display", NULL);
+//    SDL_WaitThread(thread1, &threadreturn1);
 //    decode_thread((void *) vs);
+//    while(vs->videoqueue.nb_packets > 0)
+//        displayFrame(vs);
+    for (;;){
+        SDL_Event event;
+        while (SDL_PollEvent(&event)){
+            switch (event.type){
+                case SDL_USEREVENT:
+                {
+                    displayFrame(vs);
+                } break;
+            }
+        }
+    }
+    SDL_WaitThread(thread, &threadreturn);
 
-	SDL_WaitThread(thread, &threadreturn);
 	SDL_Quit;
 	return 0;
 
