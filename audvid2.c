@@ -65,6 +65,7 @@ typedef struct VideoState {
     AVStream *audio_stream;
     AVPacket pkt;
     AVFrame *frame;
+    SwrContext *swr;
     int audio_stream_idx;
     int video_stream_idx;
     int got_frame;
@@ -117,9 +118,9 @@ static int open_codec_context(int *stream_idx,
 
 void initiate_audio_device(VideoState *vs){
 	SDL_zero(vs->want);
-	vs->want.freq = vs->audio_dec_ctx->sample_rate;
-	vs->want.format = AUDIO_F32SYS;
-	vs->want.channels = vs->audio_dec_ctx->channels;
+	vs->want.freq = 44100; //vs->audio_dec_ctx->sample_rate;
+	vs->want.format = AUDIO_S16SYS;
+	vs->want.channels = 2;
 	vs->want.samples = 4096;
 	vs->dev = SDL_OpenAudioDevice(NULL, 0, &vs->want, &vs->have, 0);
 	SDL_PauseAudioDevice(vs->dev, 0);
@@ -232,15 +233,20 @@ int decode_packet(VideoState *vs){
 		ret = avcodec_decode_audio4(vs->audio_dec_ctx, vs->frame, &vs->got_frame, &vs->pkt);
         decoded = FFMIN(ret, vs->pkt.size);
         if (vs->got_frame){
-            size_t unpadded_linesize = vs->frame->nb_samples * av_get_bytes_per_sample(AV_SAMPLE_FMT_FLTP);
+            
             vs->frame->pts = av_frame_get_best_effort_timestamp(vs->frame);
             vs->frame->pts = av_rescale_q(vs->frame->pts, vs->audio_stream->time_base, AV_TIME_BASE_Q);
             printf("audio_frame queued: %d nb_samples:%d pts:%d\n",
                     SDL_GetQueuedAudioSize(vs->dev),
                     vs->frame->nb_samples,
                     vs->frame->pts);
-            uint_t membuf[
-            SDL_QueueAudio(vs->dev, vs->frame->data[0], unpadded_linesize*vs->audio_dec_ctx->channels);
+            uint8_t *output;
+            int out_samples = av_rescale_rnd(swr_get_delay(vs->swr, 48000) + vs->frame->nb_samples, 44100, 48000, AV_ROUND_UP);
+            av_samples_alloc(&output, NULL, 2, out_samples, AV_SAMPLE_FMT_S16, 0);
+            out_samples = swr_convert(vs->swr, &output, out_samples, vs->frame->data, vs->frame->nb_samples);
+            size_t unpadded_linesize = out_samples * av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
+            SDL_QueueAudio(vs->dev, output, unpadded_linesize*2);
+            av_freep(&output);
         }
     } else if (vs->pkt.stream_index == vs->video_stream_idx){
         packet_queue_put(&vs->videoqueue, &vs->pkt);
@@ -278,6 +284,16 @@ int decode_thread(void *arg){
     // initiate packetqueue
     packet_queue_init(&vs->videoqueue);
     
+    // initiate resample context
+    SwrContext *swr = swr_alloc();
+    av_opt_set_channel_layout(swr, "in_channel_layout",  AV_CH_LAYOUT_5POINT1, 0);
+    av_opt_set_channel_layout(swr, "out_channel_layout", AV_CH_LAYOUT_STEREO,  0);
+    av_opt_set_int(swr, "in_sample_rate",     48000,                0);
+    av_opt_set_int(swr, "out_sample_rate",    44100,                0);
+    av_opt_set_sample_fmt(swr, "in_sample_fmt",  AV_SAMPLE_FMT_FLTP, 0);
+    av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_S16,  0);
+    swr_init(swr);
+    vs->swr = swr;
 	vs->frame = av_frame_alloc();
 	av_init_packet(&vs->pkt);
 	vs->pkt.data = NULL;
