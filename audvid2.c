@@ -77,7 +77,10 @@ typedef struct VideoState {
     SDL_AudioSpec want, have;
     SDL_AudioDeviceID dev;
     PacketQueue videoqueue;
+    PacketQueue audioqueue;
 } VideoState;
+
+FILE *fp;
 
 static int open_codec_context(int *stream_idx,
                                 AVFormatContext *fmt_ctx,
@@ -116,12 +119,15 @@ static int open_codec_context(int *stream_idx,
     return 0;
 }
 
+
 void initiate_audio_device(VideoState *vs){
 	SDL_zero(vs->want);
 	vs->want.freq = 44100; //vs->audio_dec_ctx->sample_rate;
 	vs->want.format = AUDIO_S16SYS;
 	vs->want.channels = 2;
 	vs->want.samples = 4096;
+    vs->want.callback = audio_callback;
+    vs->want.userdata = vs;
 	vs->dev = SDL_OpenAudioDevice(NULL, 0, &vs->want, &vs->have, 0);
 	SDL_PauseAudioDevice(vs->dev, 0);
 }
@@ -163,6 +169,26 @@ void initiate_renderer_window(VideoState *vs){
 	SDL_RenderClear( vs->Renderer );
 }
 
+Uint32 callback_queueAudio(Uint32 interval, void *param){
+    SDL_Event event;
+    SDL_UserEvent userevent;
+
+    /* In this example, our callback pushes an SDL_USEREVENT event
+    into the queue, and causes our callback to be called again at the
+    same interval: */
+
+    userevent.type = SDL_USEREVENT;
+    userevent.code = 1;
+    userevent.data1 = NULL;
+    userevent.data2 = NULL;
+
+    event.type = SDL_USEREVENT;
+    event.user = userevent;
+
+    SDL_PushEvent(&event);
+    return (interval);
+}
+
 Uint32 callback_displayFrame(Uint32 interval, void *param)
 {
     SDL_Event event;
@@ -184,6 +210,66 @@ Uint32 callback_displayFrame(Uint32 interval, void *param)
     return (interval);
 }
 
+
+void audio_callback(void *userdata, Uint8 *stream, int len) {
+
+  VideoState *is = (VideoState *)userdata;
+  int len1, audio_size;
+  double pts;
+
+  while(len > 0) {
+    if(is->audio_buf_index >= is->audio_buf_size) {
+      /* We have already sent all our data; get more */
+      audio_size = audio_decode_frame(is, &pts);
+      if(audio_size < 0) {
+	/* If error, output silence */
+	is->audio_buf_size = 1024;
+	memset(is->audio_buf, 0, is->audio_buf_size);
+      } else {
+	is->audio_buf_size = audio_size;
+      }
+      is->audio_buf_index = 0;
+    }
+    len1 = is->audio_buf_size - is->audio_buf_index;
+    if(len1 > len)
+      len1 = len;
+    memcpy(stream, (uint8_t *)is->audio_buf + is->audio_buf_index, len1);
+    len -= len1;
+    stream += len1;
+    is->audio_buf_index += len1;
+  }
+}
+
+int queueAudio(VideoState *vs){
+    AVPacket pkt;
+    int gotframe;
+    AVFrame *frame;
+    int ret, decoded;
+    frame = av_frame_alloc();
+    if (packet_queue_get(&vs->audioqueue, &pkt, 0)){
+        ret = avcodec_decode_audio4(vs->audio_dec_ctx, frame, &gotframe, &pkt);
+        decoded = FFMIN(ret, pkt.size);
+        if (gotframe){
+            frame->pts = av_frame_get_best_effort_timestamp(frame);
+            frame->pts = av_rescale_q(frame->pts, vs->audio_stream->time_base, AV_TIME_BASE_Q);
+            uint8_t *output;
+            int out_samples = av_rescale_rnd(swr_get_delay(vs->swr, 48000) + frame->nb_samples, 44100, 48000, AV_ROUND_UP);
+            av_samples_alloc(&output, NULL, 2, out_samples, AV_SAMPLE_FMT_S16, 0);
+            out_samples = swr_convert(vs->swr, &output, out_samples, frame->data, frame->nb_samples);
+            size_t unpadded_linesize = out_samples * av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
+            SDL_QueueAudio(vs->dev, output, unpadded_linesize*2);
+            fprintf(fp, "audio_frame queued: %d linesize:%d pts:%d\n",
+                    SDL_GetQueuedAudioSize(vs->dev),
+                    unpadded_linesize*2,
+                    frame->pts);
+            av_freep(&output);
+        }
+    }
+   // av_packet_unref(&pkt);
+    //av_free(frame);
+    return 0;
+}
+
 int displayFrame(VideoState *vs){
     /* decode video frame */
     AVPacket pkt;
@@ -195,10 +281,11 @@ int displayFrame(VideoState *vs){
         if (gotframe) {
             frame->pts = av_frame_get_best_effort_timestamp(frame);
             frame->pts = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
-            printf("video_frame n:%d coded_n:%d pts:%d\n",
-                   vs->video_frame_count++,
-                   frame->coded_picture_number,
-                   frame->pts);
+            fprintf(fp, "video_frame queued: %d n:%d coded_n:%d pts:%d\n",
+                    SDL_GetQueuedAudioSize(vs->dev),
+                    vs->video_frame_count++,
+                    frame->coded_picture_number,
+                    frame->pts);
             SDL_UpdateYUVTexture(vs->Texture,
                                     NULL,
                                     frame->data[0],
@@ -211,18 +298,9 @@ int displayFrame(VideoState *vs){
             SDL_RenderPresent(vs->Renderer);
         }
     }
-//    av_packet_unref(&pkt);
-//    av_free(frame);
+    //av_packet_unref(&pkt);
+    //av_free(frame);
 	return 0;
-}
-
-int displayFrame_thread(void *arg){
-    Uint32 delay = 0;
-    for (;;){
-        SDL_TimerID my_timer_id = SDL_AddTimer(delay + 1000, callback_displayFrame, NULL);
-        delay += 1000;
-    }
-    return 0;
 }
 
 int decode_packet(VideoState *vs){
@@ -230,24 +308,7 @@ int decode_packet(VideoState *vs){
     int ret = 0;
 //    if (0){
 	if (vs->pkt.stream_index == vs->audio_stream_idx){
-		ret = avcodec_decode_audio4(vs->audio_dec_ctx, vs->frame, &vs->got_frame, &vs->pkt);
-        decoded = FFMIN(ret, vs->pkt.size);
-        if (vs->got_frame){
-            
-            vs->frame->pts = av_frame_get_best_effort_timestamp(vs->frame);
-            vs->frame->pts = av_rescale_q(vs->frame->pts, vs->audio_stream->time_base, AV_TIME_BASE_Q);
-            printf("audio_frame queued: %d nb_samples:%d pts:%d\n",
-                    SDL_GetQueuedAudioSize(vs->dev),
-                    vs->frame->nb_samples,
-                    vs->frame->pts);
-            uint8_t *output;
-            int out_samples = av_rescale_rnd(swr_get_delay(vs->swr, 48000) + vs->frame->nb_samples, 44100, 48000, AV_ROUND_UP);
-            av_samples_alloc(&output, NULL, 2, out_samples, AV_SAMPLE_FMT_S16, 0);
-            out_samples = swr_convert(vs->swr, &output, out_samples, vs->frame->data, vs->frame->nb_samples);
-            size_t unpadded_linesize = out_samples * av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
-            SDL_QueueAudio(vs->dev, output, unpadded_linesize*2);
-            av_freep(&output);
-        }
+        packet_queue_put(&vs->audioqueue, &vs->pkt);
     } else if (vs->pkt.stream_index == vs->video_stream_idx){
         packet_queue_put(&vs->videoqueue, &vs->pkt);
     }
@@ -283,6 +344,7 @@ int decode_thread(void *arg){
     initiate_renderer_window(vs);
     // initiate packetqueue
     packet_queue_init(&vs->videoqueue);
+    packet_queue_init(&vs->audioqueue);
     
     // initiate resample context
     SwrContext *swr = swr_alloc();
@@ -321,6 +383,7 @@ int decode_thread(void *arg){
 }
 
 int main(int argc, char **argv){
+    fp = fopen("c:\\users\\sbf\\sdl_log.txt", "w");
 	VideoState *vs;
 	SDL_Thread *thread;
     SDL_Thread *thread1;
@@ -336,7 +399,8 @@ int main(int argc, char **argv){
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
 	
 	thread = SDL_CreateThread(decode_thread, "decoder", vs);
-    SDL_AddTimer(31, callback_displayFrame, NULL);
+    SDL_AddTimer(27, callback_displayFrame, NULL);
+//    SDL_AddTimer(5, callback_queueAudio, NULL);
     
 //    thread1 = SDL_CreateThread(displayFrame_thread, "display", NULL);
 //    SDL_WaitThread(thread1, &threadreturn1);
@@ -349,7 +413,10 @@ int main(int argc, char **argv){
             switch (event.type){
                 case SDL_USEREVENT:
                 {
-                    displayFrame(vs);
+                    if (event.user.code)
+                        queueAudio(vs);
+                    else
+                        displayFrame(vs);
                 } break;
             }
         }
@@ -357,6 +424,7 @@ int main(int argc, char **argv){
     SDL_WaitThread(thread, &threadreturn);
 
 	SDL_Quit;
+    fclose(fp);
 	return 0;
 
 }
