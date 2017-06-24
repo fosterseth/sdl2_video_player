@@ -1,4 +1,4 @@
-//gcc -w -o audvid audvid.c -I/usr/local/include -L/usr/local/lib -llibavcodec -llibavformat -llibavutil `sdl2-config --cflags --libs`
+//gcc -shared -w -o audvid audvid.dll -IC:/msys64/mingw64/include -LC:/msys64/mingw64/bin -lmingw32 -lSDL2main -lSDL2 -mwindows -llibavcodec -llibavformat -llibavutil -Dmain=SDL_main
 /*
 8-bit support
 AUDIO_S8 signed 8-bit samples
@@ -58,7 +58,7 @@ http://stackoverflow.com/questions/21007329/what-is-a-sdl-renderer/21007477#2100
 
 typedef struct VideoState {
     char src_filename[1024];
-    AVFormatContext *fmt_ctx ;
+    AVFormatContext *fmt_ctx;
     AVCodecContext *video_dec_ctx;
     AVCodecContext *audio_dec_ctx;
     AVStream *video_stream;
@@ -69,6 +69,10 @@ typedef struct VideoState {
     int64_t last_audio_pts;
     int64_t last_video_pts;
     int64_t current_video_pts;
+    int64_t interval;
+    int64_t delay;
+    Uint32 queued_size;
+    Uint32 queued_ms;
     int set_swrContext;
     int bytes_per_sample;
     int audio_stream_idx;
@@ -86,6 +90,81 @@ typedef struct VideoState {
 } VideoState;
 
 FILE *fp;
+
+void PrintEvent(const SDL_Event * event, VideoState *vs)
+{
+    if (event->type == SDL_WINDOWEVENT) {
+        switch (event->window.event) {
+        case SDL_WINDOWEVENT_SHOWN:
+            SDL_Log("Window %d shown", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_HIDDEN:
+            SDL_Log("Window %d hidden", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_EXPOSED:
+            SDL_Log("Window %d exposed", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_MOVED:
+            SDL_Log("Window %d moved to %d,%d",
+                    event->window.windowID, event->window.data1,
+                    event->window.data2);
+            break;
+        case SDL_WINDOWEVENT_RESIZED:
+            SDL_Log("Window %d resized to %dx%d",
+                    event->window.windowID, event->window.data1,
+                    event->window.data2);
+            break;
+        case SDL_WINDOWEVENT_SIZE_CHANGED:
+            SDL_Log("Window %d size changed to %dx%d",
+                    event->window.windowID, event->window.data1,
+                    event->window.data2);
+            break;
+        case SDL_WINDOWEVENT_MINIMIZED:
+            SDL_Log("Window %d minimized", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_MAXIMIZED:
+            SDL_Log("Window %d maximized", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_RESTORED:
+            SDL_Log("Window %d restored", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_ENTER:
+            SDL_Log("Mouse entered window %d",
+                    event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_LEAVE:
+            SDL_Log("Mouse left window %d", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+            SDL_Log("Window %d gained keyboard focus",
+                    event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_FOCUS_LOST:
+            SDL_Log("Window %d lost keyboard focus",
+                    event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_CLOSE:
+            SDL_Log("Window %d closed", event->window.windowID);
+            break;
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+        case SDL_WINDOWEVENT_TAKE_FOCUS:
+            SDL_Log("Window %d is offered a focus", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_HIT_TEST:
+            SDL_Log("Window %d has a special hit test", event->window.windowID);
+            break;
+#endif
+        default:
+            SDL_Log("Window %d got unknown event %d",
+                    event->window.windowID, event->window.event);
+            break;
+        }
+    }
+//    if (event->type == SDL_MOUSEBUTTONDOWN){
+//        printPTS(vs);
+//    }
+}
+
 
 static int open_codec_context(int *stream_idx,
                                 AVFormatContext *fmt_ctx,
@@ -131,8 +210,6 @@ void initiate_audio_device(VideoState *vs){
 	vs->want.format = AUDIO_S16SYS;
 	vs->want.channels = 2;
 	vs->want.samples = 4096;
-//    vs->want.callback = audio_callback;
-//    vs->want.userdata = vs;
 	vs->dev = SDL_OpenAudioDevice(NULL, 0, &vs->want, &vs->have, 0);
 	SDL_PauseAudioDevice(vs->dev, 0);
 }
@@ -190,23 +267,15 @@ Uint32 callback_queueAudio(Uint32 interval, void *param){
     event.user = userevent;
     event.type = SDL_USEREVENT;
     
-
-   
     Uint32 queued_size = SDL_GetQueuedAudioSize(vs->dev);
     Uint32 queued_ms = 0;
     if (vs->bytes_per_sample > 0){
         queued_ms = (Uint32) ((double) queued_size / 2 / vs->bytes_per_sample / 48000 * 1000);
         if ( queued_ms < 100) // milliseconds of queuedAudio
-            queueAudio(vs);
+            SDL_PushEvent(&event);
     }
-//            SDL_PushEvent(&event);
-//    if (vs->bytes_per_sample > 0)
-//        interval = (queued_size / vs->bytes_per_sample / 48000 * 1000 / 2);
-//    if (interval < 1)
-//        interval = 10;
-    printf("queued_size %d    queued_ms %d\n", queued_size, queued_ms);
-    fprintf(fp, "queued_size %d    queued_ms %d\n", queued_size, queued_ms);
-
+    vs->queued_ms = queued_ms;
+    vs->queued_size = queued_size;
     return (interval);
 }
 
@@ -227,24 +296,21 @@ Uint32 callback_displayFrame(Uint32 interval, void *param)
     event.user = userevent;
     event.type = SDL_USEREVENT;
 
-    int64_t delay = (vs->last_audio_pts - 0) - vs->current_video_pts;
-    interval = vs->current_video_pts - vs->last_video_pts;
-    if (interval == 0)
-        interval = 40000;
+    vs->delay = (vs->last_audio_pts - 0) - vs->current_video_pts;
+    vs->interval = vs->current_video_pts - vs->last_video_pts;
+//    if (interval == 0)
+//        interval = 40000;
+//
+//    if (delay > interval)
+//        interval -= 5000;
+//    if (delay < -interval)
+//        interval += 5000;
+    if (vs->interval > 0)
+        interval = (Uint32) (vs->interval / 1000);
 
-    if (delay > interval)
-        interval -= 5000;
-    if (delay < -interval)
-        interval += 5000;
-    
-    interval = interval / 1000;
-
-    printf("interval %d   last_audio %d   current_video %d   delay %d\n", interval, vs->last_audio_pts, vs->current_video_pts, delay);
-    fprintf(fp, "interval %d   last_audio %d   current_video %d   delay %d\n", interval, vs->last_audio_pts, vs->current_video_pts, delay);
-//    vs->last_audio_pts = 0;
     vs->last_video_pts = vs->current_video_pts;
-//    SDL_PushEvent(&event);
-    displayFrame(vs);
+    SDL_PushEvent(&event);
+//    displayFrame(vs);
     return (interval);
 }
 
@@ -275,7 +341,6 @@ int queueAudio(VideoState *vs){
             
             frame->pts = av_frame_get_best_effort_timestamp(frame);
             int last_audio_pts = av_rescale_q(frame->pts, vs->audio_stream->time_base, AV_TIME_BASE_Q);
-//            if (vs->last_audio_pts == 0)
             vs->last_audio_pts = last_audio_pts; 
             uint8_t *output;
 //            int out_samples = av_rescale_rnd(swr_get_delay(vs->swr, 48000) + frame->nb_samples, 44100, 48000, AV_ROUND_UP);
@@ -285,10 +350,6 @@ int queueAudio(VideoState *vs){
             
             size_t unpadded_linesize = out_samples * vs->bytes_per_sample;
             SDL_QueueAudio(vs->dev, output, unpadded_linesize*2);
-//            fprintf(fp, "audio_frame queued: %d linesize:%d pts:%d\n",
-//                    SDL_GetQueuedAudioSize(vs->dev),
-//                    unpadded_linesize*2,
-//                    vs->last_audio_pts);
             av_freep(&output);
         }
     }
@@ -308,11 +369,6 @@ int displayFrame(VideoState *vs){
         if (gotframe) {
             frame->pts = av_frame_get_best_effort_timestamp(frame);
             vs->current_video_pts = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
-//            fprintf(fp, "video_frame queued: %d n:%d coded_n:%d pts:%d\n",
-//                    SDL_GetQueuedAudioSize(vs->dev),
-//                    vs->video_frame_count++,
-//                    frame->coded_picture_number,
-//                    vs->last_video_pts);
             SDL_UpdateYUVTexture(vs->Texture,
                                     NULL,
                                     frame->data[0],
@@ -347,8 +403,51 @@ int decode_packet(VideoState *vs){
 }
 
 int decode_thread(void *arg){
-	VideoState *vs = (VideoState *)arg;
+    VideoState *vs = (VideoState *)arg;
+    int ret = 0;
+	while (av_read_frame(vs->fmt_ctx, &vs->pkt) >= 0) {
+        AVPacket orig_pkt = vs->pkt;
+        do {
+            ret = decode_packet(vs);
+            if (ret < 0)
+                break;
+            vs->pkt.data += ret;
+            vs->pkt.size -= ret;
+        } while (vs->pkt.size > 0);
+//        av_packet_unref(&orig_pkt);
+    }
+    while(SDL_GetQueuedAudioSize(vs->dev) > 0){
+        continue;
+    }
+    while(vs->videoqueue.nb_packets > 0)
+        continue;
+
+	return 0;
+}
+
+Uint32 printPTS(Uint32 interval, void *arg){
+    VideoState *vs = (VideoState *) arg;
+    if (vs->interval > 0){
+        printf("interval %d   last_audio %d   current_video %d   delay %d\n", vs->interval, vs->last_audio_pts, vs->current_video_pts, vs->delay);
+        printf("queued_size %d    queued_ms %d\n", vs->queued_size, vs->queued_ms);
+    }
+    return interval;
+}
+
+int main(int argc, char **argv){
+    fp = fopen("c:\\users\\sbf\\desktop\\sdl_log.txt", "w");
+	VideoState *vs;
+	SDL_Thread *thread;
+	int threadreturn;
+
+	vs = av_mallocz(sizeof(VideoState));
 	
+    av_strlcpy(vs->src_filename, argv[1], sizeof(vs->src_filename));
+    
+    av_register_all();
+    
+	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
+    
 	avformat_open_input(&vs->fmt_ctx, vs->src_filename, NULL, NULL);
 	avformat_find_stream_info(vs->fmt_ctx, NULL);
 	
@@ -378,75 +477,34 @@ int decode_thread(void *arg){
 	vs->pkt.data = NULL;
 	vs->pkt.size = 0;
     vs->bytes_per_sample = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
-
-	int ret = 0;
     vs->set_swrContext = 1;
-	while (av_read_frame(vs->fmt_ctx, &vs->pkt) >= 0) {
-        AVPacket orig_pkt = vs->pkt;
-        do {
-            ret = decode_packet(vs);
-            if (ret < 0)
-                break;
-            vs->pkt.data += ret;
-            vs->pkt.size -= ret;
-        } while (vs->pkt.size > 0);
-//        av_packet_unref(&orig_pkt);
-    }
-    while(SDL_GetQueuedAudioSize(vs->dev) > 0){
-        continue;
-    }
-    while(vs->videoqueue.nb_packets > 0)
-        continue;
-
-	return 0;
-}
-
-int main(int argc, char **argv){
-    fp = fopen("c:\\users\\sbf\\desktop\\sdl_log.txt", "w");
-	VideoState *vs;
-	SDL_Thread *thread;
-    SDL_Thread *thread1;
-	int threadreturn;
-    int threadreturn1;
-
-	vs = av_mallocz(sizeof(VideoState));
-	
-    av_strlcpy(vs->src_filename, argv[1], sizeof(vs->src_filename));
-    
-    av_register_all();
-    
-	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
 	
 	thread = SDL_CreateThread(decode_thread, "decoder", vs);
     SDL_TimerID timer_dF = SDL_AddTimer(40, callback_displayFrame, (void *) vs);
     SDL_TimerID timer_qA = SDL_AddTimer(5, callback_queueAudio, (void *) vs);
+    SDL_TimerID timer_printPTS = SDL_AddTimer(1000, printPTS, (void *) vs);
     
-//    thread1 = SDL_CreateThread(displayFrame_thread, "display", NULL);
-//    SDL_WaitThread(thread1, &threadreturn1);
-//    decode_thread((void *) vs);
-//    while(vs->videoqueue.nb_packets > 0)
-//        displayFrame(vs);
-
-
-//    for (;;){
-//        SDL_Event event;
-//        while (SDL_PollEvent(&event)){
-//            switch (event.type){
-//                case SDL_USEREVENT:
-//                {
-//                    if (event.user.code == 2)
-//                        queueAudio(vs);
-//                    else if (event.user.code == 1)
-//                        displayFrame(vs);
-//                } break;
-//            }
-//        }
-//    }
+    for (;;){
+        SDL_Event event;
+        while (SDL_PollEvent(&event)){
+            PrintEvent(&event, vs);
+            switch (event.type){
+                case SDL_USEREVENT:
+                {
+                    if (event.user.code == 2)
+                        queueAudio(vs);
+                    else if (event.user.code == 1)
+                        displayFrame(vs);
+                } break;
+            }
+        }
+    }
 
 
     SDL_WaitThread(thread, &threadreturn);
     SDL_RemoveTimer(timer_dF);
     SDL_RemoveTimer(timer_qA);
+    SDL_RemoveTimer(timer_printPTS);
 
 	SDL_Quit;
     fclose(fp);
