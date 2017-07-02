@@ -71,14 +71,15 @@ typedef struct VideoState {
     int64_t current_video_pts;
     int64_t interval;
     int64_t delay;
-    Uint32 queued_size;
-    Uint32 queued_ms;
+    int64_t queued_size;
+    int64_t queued_ms;
     int set_swrContext;
     int bytes_per_sample;
     int audio_stream_idx;
     int video_stream_idx;
     int got_frame;
     int video_frame_count;
+    int frame_total;
     SDL_Renderer *Renderer;
     SDL_Window *Window;
     SDL_Texture *Texture;
@@ -90,9 +91,9 @@ typedef struct VideoState {
 } VideoState;
 
 FILE *fp;
+int quit_signal = 0;
 
-void PrintEvent(const SDL_Event * event, VideoState *vs)
-{
+void PrintEvent(const SDL_Event * event, VideoState *vs){
     if (event->type == SDL_WINDOWEVENT) {
         switch (event->window.event) {
         case SDL_WINDOWEVENT_SHOWN:
@@ -145,6 +146,7 @@ void PrintEvent(const SDL_Event * event, VideoState *vs)
             break;
         case SDL_WINDOWEVENT_CLOSE:
             SDL_Log("Window %d closed", event->window.windowID);
+            quit_signal = 1;
             break;
 #if SDL_VERSION_ATLEAST(2, 0, 5)
         case SDL_WINDOWEVENT_TAKE_FOCUS:
@@ -168,8 +170,7 @@ void PrintEvent(const SDL_Event * event, VideoState *vs)
 
 static int open_codec_context(int *stream_idx,
                                 AVFormatContext *fmt_ctx,
-                                enum AVMediaType type)
-{
+                                enum AVMediaType type){
     int ret, stream_index;
     AVStream *st;
     AVCodecContext *dec_ctx = NULL;
@@ -267,20 +268,13 @@ Uint32 callback_queueAudio(Uint32 interval, void *param){
     event.user = userevent;
     event.type = SDL_USEREVENT;
     
-    Uint32 queued_size = SDL_GetQueuedAudioSize(vs->dev);
-    Uint32 queued_ms = 0;
-    if (vs->bytes_per_sample > 0){
-        queued_ms = (Uint32) ((double) queued_size / 2 / vs->bytes_per_sample / 48000 * 1000);
-        if ( queued_ms < 100) // milliseconds of queuedAudio
-            SDL_PushEvent(&event);
-    }
-    vs->queued_ms = queued_ms;
-    vs->queued_size = queued_size;
+    if ( vs->queued_ms < 1000 ) // milliseconds of queuedAudio
+        SDL_PushEvent(&event);
+
     return (interval);
 }
 
-Uint32 callback_displayFrame(Uint32 interval, void *param)
-{
+Uint32 callback_displayFrame(Uint32 interval, void *param){
     VideoState *vs = (VideoState *) param;
     SDL_Event event;
     SDL_UserEvent userevent;
@@ -296,21 +290,27 @@ Uint32 callback_displayFrame(Uint32 interval, void *param)
     event.user = userevent;
     event.type = SDL_USEREVENT;
 
-    vs->delay = (vs->last_audio_pts - 0) - vs->current_video_pts;
-    vs->interval = vs->current_video_pts - vs->last_video_pts;
-//    if (interval == 0)
-//        interval = 40000;
-//
-//    if (delay > interval)
-//        interval -= 5000;
-//    if (delay < -interval)
-//        interval += 5000;
-    if (vs->interval > 0)
-        interval = (Uint32) (vs->interval / 1000);
-
+    Uint32 queued_size = SDL_GetQueuedAudioSize(vs->dev);
+    int64_t queued_ns = 0;
+    int64_t queued_ms = 0;
+    if (vs->bytes_per_sample > 0)
+        queued_ns = (int64_t) ((double) queued_size / 2.0 / (double) vs->bytes_per_sample / 48000.0 * 1000000);
+    vs->queued_ms = (int64_t) queued_ns / 1000;
+    vs->queued_size = queued_size;
+    
+    vs->delay = (vs->last_audio_pts - queued_ns - vs->current_video_pts) / 1000;
+    vs->frame_total += 1;
+    Uint32 new_interval = (Uint32) ((vs->current_video_pts - vs->last_video_pts) / 1000);
+    if (new_interval > 0)
+        interval = new_interval;
     vs->last_video_pts = vs->current_video_pts;
+    if (vs->delay < -100)
+        interval = interval + 3;
+    if (vs->delay > 100)
+        interval = interval - 3;
+    
+    vs->interval = interval;
     SDL_PushEvent(&event);
-//    displayFrame(vs);
     return (interval);
 }
 
@@ -340,7 +340,7 @@ int queueAudio(VideoState *vs){
             }
             
             frame->pts = av_frame_get_best_effort_timestamp(frame);
-            int last_audio_pts = av_rescale_q(frame->pts, vs->audio_stream->time_base, AV_TIME_BASE_Q);
+            int64_t last_audio_pts = av_rescale_q(frame->pts, (AVRational){1,48000}, AV_TIME_BASE_Q);
             vs->last_audio_pts = last_audio_pts; 
             uint8_t *output;
 //            int out_samples = av_rescale_rnd(swr_get_delay(vs->swr, 48000) + frame->nb_samples, 44100, 48000, AV_ROUND_UP);
@@ -350,6 +350,7 @@ int queueAudio(VideoState *vs){
             
             size_t unpadded_linesize = out_samples * vs->bytes_per_sample;
             SDL_QueueAudio(vs->dev, output, unpadded_linesize*2);
+//            printf("just_queued    %d     bytes    %d\n", SDL_GetQueuedAudioSize(vs->dev), unpadded_linesize * 2);
             av_freep(&output);
         }
     }
@@ -441,6 +442,7 @@ int main(int argc, char **argv){
 	int threadreturn;
 
 	vs = av_mallocz(sizeof(VideoState));
+    vs->frame_total = 0;
 	
     av_strlcpy(vs->src_filename, argv[1], sizeof(vs->src_filename));
     
@@ -472,6 +474,7 @@ int main(int argc, char **argv){
     packet_queue_init(&vs->videoqueue);
     packet_queue_init(&vs->audioqueue);
     
+    vs->last_video_pts = 0;
 	vs->frame = av_frame_alloc();
 	av_init_packet(&vs->pkt);
 	vs->pkt.data = NULL;
@@ -480,13 +483,13 @@ int main(int argc, char **argv){
     vs->set_swrContext = 1;
 	
 	thread = SDL_CreateThread(decode_thread, "decoder", vs);
-    SDL_TimerID timer_dF = SDL_AddTimer(40, callback_displayFrame, (void *) vs);
-    SDL_TimerID timer_qA = SDL_AddTimer(5, callback_queueAudio, (void *) vs);
+    SDL_TimerID timer_dF = SDL_AddTimer(33, callback_displayFrame, (void *) vs);
+    SDL_TimerID timer_qA = SDL_AddTimer(20, callback_queueAudio, (void *) vs);
     SDL_TimerID timer_printPTS = SDL_AddTimer(1000, printPTS, (void *) vs);
-    
-    for (;;){
-        SDL_Event event;
-        while (SDL_PollEvent(&event)){
+//  
+    SDL_Event event;
+    while (quit_signal == 0){
+        if(SDL_PollEvent(&event)){
             PrintEvent(&event, vs);
             switch (event.type){
                 case SDL_USEREVENT:
@@ -501,7 +504,8 @@ int main(int argc, char **argv){
     }
 
 
-    SDL_WaitThread(thread, &threadreturn);
+
+    //SDL_WaitThread(thread, &threadreturn);
     SDL_RemoveTimer(timer_dF);
     SDL_RemoveTimer(timer_qA);
     SDL_RemoveTimer(timer_printPTS);
