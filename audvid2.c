@@ -80,6 +80,7 @@ typedef struct VideoState {
     int got_frame;
     int video_frame_count;
     int frame_total;
+    int threadreturn;
     SDL_Renderer *Renderer;
     SDL_Window *Window;
     SDL_Texture *Texture;
@@ -436,7 +437,7 @@ Uint32 printPTS(Uint32 interval, void *arg){
 }
 
 int main(int argc, char **argv){
-    fp = fopen("c:\\users\\sbf\\desktop\\sdl_log.txt", "w");
+//    fp = fopen("c:\\users\\sbf\\desktop\\sdl_log.txt", "w");
 	VideoState *vs;
 	SDL_Thread *thread;
 	int threadreturn;
@@ -511,7 +512,7 @@ int main(int argc, char **argv){
     SDL_RemoveTimer(timer_printPTS);
 
 	SDL_Quit;
-    fclose(fp);
+//    fclose(fp);
 	return 0;
 
 }
