@@ -47,6 +47,7 @@ SDL_AudioSpec want, have;
 SDL_AudioDeviceID dev;
 int quit_signal;
 int64_t last_audio_pts;
+int bytes_per_sample;
 
 
 void PrintEvent(const SDL_Event * event){
@@ -390,6 +391,22 @@ Uint32 printPTS(Uint32 interval, void *arg){
     return interval;
 }
 
+void displayFrame_thread(VideoState *vs){
+    while(vs->videoqueue.nb_packets > 0){
+        SDL_Delay(30);
+
+        Uint32 queued_size = SDL_GetQueuedAudioSize(dev);
+        int64_t queued_ns = 0;
+        int64_t queued_ms = 0;
+        if (vs->bytes_per_sample > 0)
+            queued_ns = (int64_t) ((double) queued_size / 2.0 / (double) vs->bytes_per_sample / 48000.0 * 1000000);
+        vs->queued_ms = (int64_t) queued_ns / 1000;
+        vs->queued_size = queued_size;
+
+        vs->delay = (last_audio_pts - queued_ns - vs->current_video_pts) / 1000;
+        displayFrame(vs);
+    }
+}
 
 int main(int argc, char **argv){
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
@@ -398,7 +415,9 @@ int main(int argc, char **argv){
     int v;
     int x_pos = 500;
     int y_pos = 200;
-    VideoState *vs_array[2];
+    VideoState *vs_array[argc-1];
+    SDL_Thread *thread_array[argc-1];
+    int looking_for_master_audio = 1;
     for (v=0; v < argc-1; v++){
         VideoState *vs;
         vs = av_mallocz(sizeof(VideoState));
@@ -423,8 +442,9 @@ int main(int argc, char **argv){
 
 
         // open audio device
-        if (v == 0 & vs->audio_stream_idx > -1){
+        if (vs->audio_stream_idx > -1 & looking_for_master_audio == 1){
             vs->master_audio = 1;
+            looking_for_master_audio = 0;
             packet_queue_init(&vs->audioqueue);
             initiate_audio_device(vs);
         }
@@ -444,20 +464,17 @@ int main(int argc, char **argv){
         vs->bytes_per_sample = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
         vs->set_swrContext = 1;
         decode_thread(vs);
+        if (vs->master_audio){
+            vs->timer_qA = SDL_AddTimer(20, callback_queueAudio, (void *) vs);
+        }
         vs_array[v] = vs;
     }
-
-    v = 0;
-    int break_flag = 1;
-    while(break_flag){
-        SDL_Delay(30);
-        for (v = 0; v < argc-1; v++){
-            if (vs_array[v]->videoqueue.nb_packets > 0)
-                displayFrame(vs_array[v]);
-            else
-                break_flag = 0;
-        }
+    for (v = 0; v < argc-1; v++){
+        vs_array[v]->thread = SDL_CreateThread(displayFrame_thread, "displayframethread", vs_array[v]);
     }
+
+    int threadreturn;
+    SDL_WaitThread(vs_array[0]->thread, threadreturn);
 
 
 	SDL_Quit();
