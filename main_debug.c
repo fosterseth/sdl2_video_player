@@ -33,10 +33,12 @@ typedef struct VideoState {
     int video_frame_count;
     int frame_total;
     int master_audio;
+    int seek_flag;
     SDL_Renderer *Renderer;
     SDL_Window *Window;
     SDL_Texture *Texture;
     SDL_Thread *thread;
+	SDL_Thread *thread_printPTS;
     SDL_TimerID timer_dF;
     SDL_TimerID timer_qA;
     SDL_TimerID timer_printPTS;
@@ -48,79 +50,81 @@ SDL_AudioDeviceID dev;
 int quit_signal;
 int64_t last_audio_pts;
 int bytes_per_sample;
-
+int seek_flag;
+AVPacket flush_pkt;
 
 void PrintEvent(const SDL_Event * event){
-    if (event->type == SDL_WINDOWEVENT) {
-        switch (event->window.event) {
-        case SDL_WINDOWEVENT_SHOWN:
-            SDL_Log("Window %d shown", event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_HIDDEN:
-            SDL_Log("Window %d hidden", event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_EXPOSED:
-            SDL_Log("Window %d exposed", event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_MOVED:
-            SDL_Log("Window %d moved to %d,%d",
-                    event->window.windowID, event->window.data1,
-                    event->window.data2);
-            break;
-        case SDL_WINDOWEVENT_RESIZED:
-            SDL_Log("Window %d resized to %dx%d",
-                    event->window.windowID, event->window.data1,
-                    event->window.data2);
-            break;
-        case SDL_WINDOWEVENT_SIZE_CHANGED:
-            SDL_Log("Window %d size changed to %dx%d",
-                    event->window.windowID, event->window.data1,
-                    event->window.data2);
-            break;
-        case SDL_WINDOWEVENT_MINIMIZED:
-            SDL_Log("Window %d minimized", event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_MAXIMIZED:
-            SDL_Log("Window %d maximized", event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_RESTORED:
-            SDL_Log("Window %d restored", event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_ENTER:
-            SDL_Log("Mouse entered window %d",
-                    event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_LEAVE:
-            SDL_Log("Mouse left window %d", event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_FOCUS_GAINED:
-            SDL_Log("Window %d gained keyboard focus",
-                    event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_FOCUS_LOST:
-            SDL_Log("Window %d lost keyboard focus",
-                    event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_CLOSE:
-            SDL_Log("Window %d closed", event->window.windowID);
-            quit_signal = 1;
-            break;
-#if SDL_VERSION_ATLEAST(2, 0, 5)
-        case SDL_WINDOWEVENT_TAKE_FOCUS:
-            SDL_Log("Window %d is offered a focus", event->window.windowID);
-            break;
-        case SDL_WINDOWEVENT_HIT_TEST:
-            SDL_Log("Window %d has a special hit test", event->window.windowID);
-            break;
-#endif
-        default:
-            SDL_Log("Window %d got unknown event %d",
-                    event->window.windowID, event->window.event);
-            break;
-        }
-    }
-//    if (event->type == SDL_MOUSEBUTTONDOWN){
-//        printPTS(vs);
+	if (event->type == SDL_KEYDOWN){
+		SDL_Log("Key pressed");
+		seek_flag = 1;
+	}
+//    if (event->type == SDL_WINDOWEVENT) {
+//        switch (event->window.event) {
+//        case SDL_WINDOWEVENT_SHOWN:
+//            SDL_Log("Window %d shown", event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_HIDDEN:
+//            SDL_Log("Window %d hidden", event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_EXPOSED:
+//            SDL_Log("Window %d exposed", event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_MOVED:
+//            SDL_Log("Window %d moved to %d,%d",
+//                    event->window.windowID, event->window.data1,
+//                    event->window.data2);
+//            break;
+//        case SDL_WINDOWEVENT_RESIZED:
+//            SDL_Log("Window %d resized to %dx%d",
+//                    event->window.windowID, event->window.data1,
+//                    event->window.data2);
+//            break;
+//        case SDL_WINDOWEVENT_SIZE_CHANGED:
+//            SDL_Log("Window %d size changed to %dx%d",
+//                    event->window.windowID, event->window.data1,
+//                    event->window.data2);
+//            break;
+//        case SDL_WINDOWEVENT_MINIMIZED:
+//            SDL_Log("Window %d minimized", event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_MAXIMIZED:
+//            SDL_Log("Window %d maximized", event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_RESTORED:
+//            SDL_Log("Window %d restored", event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_ENTER:
+//            SDL_Log("Mouse entered window %d",
+//                    event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_LEAVE:
+//            SDL_Log("Mouse left window %d", event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_FOCUS_GAINED:
+//            SDL_Log("Window %d gained keyboard focus",
+//                    event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_FOCUS_LOST:
+//            SDL_Log("Window %d lost keyboard focus",
+//                    event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_CLOSE:
+//            SDL_Log("Window %d closed", event->window.windowID);
+//            quit_signal = 1;
+//            break;
+//#if SDL_VERSION_ATLEAST(2, 0, 5)
+//        case SDL_WINDOWEVENT_TAKE_FOCUS:
+//            SDL_Log("Window %d is offered a focus", event->window.windowID);
+//            break;
+//        case SDL_WINDOWEVENT_HIT_TEST:
+//            SDL_Log("Window %d has a special hit test", event->window.windowID);
+//            break;
+//#endif
+//        default:
+//            SDL_Log("Window %d got unknown event %d",
+//                    event->window.windowID, event->window.event);
+//            break;
+//        }
 //    }
 }
 
@@ -215,10 +219,11 @@ int decode_packet(VideoState *vs){
 //    if (0){
 	if (vs->pkt.stream_index == vs->audio_stream_idx & vs->master_audio == 1){
 //        printf("audio packet %s\n", vs->src_filename);
-        packet_queue_put(&vs->audioqueue, &vs->pkt);
+        packet_queue_put(&vs->audioqueue, &vs->pkt, &flush_pkt);
+//        queueAudio(vs);
     } else if (vs->pkt.stream_index == vs->video_stream_idx){
 //        printf("video packet %s\n", vs->src_filename);
-        packet_queue_put(&vs->videoqueue, &vs->pkt);
+        packet_queue_put(&vs->videoqueue, &vs->pkt, &flush_pkt);
     }
 
 	if (vs->got_frame)
@@ -229,19 +234,39 @@ int decode_packet(VideoState *vs){
 
 int decode_thread(VideoState *vs){
 //    VideoState *vs = (VideoState *)arg;
-    int ret = 0;
-	while (av_read_frame(vs->fmt_ctx, &vs->pkt) >= 0) {
-        AVPacket orig_pkt = vs->pkt;
-        do {
-            ret = decode_packet(vs);
-            if (ret < 0)
-                break;
-            vs->pkt.data += ret;
-            vs->pkt.size -= ret;
-        } while (vs->pkt.size > 0);
-//        av_packet_unref(&orig_pkt);
-    }
+    while (quit_signal == 0){
+        SDL_Delay(5);
+        if (vs->seek_flag){
+            av_seek_frame(vs->fmt_ctx, vs->video_stream_idx, 0, AVSEEK_FLAG_BACKWARD); 
+            packet_queue_flush(&vs->videoqueue);
+            packet_queue_put(&vs->videoqueue, &flush_pkt, &flush_pkt);
 
+            if (vs->master_audio == 1){
+                SDL_ClearQueuedAudio(dev);
+                Uint32 queued_size = SDL_GetQueuedAudioSize(dev);
+//                vs->master_audio = 0;
+//                SDL_PauseAudioDevice(dev, 1);
+                packet_queue_flush(&vs->audioqueue);
+                packet_queue_put(&vs->audioqueue, &flush_pkt, &flush_pkt);
+//                av_seek_frame(vs->fmt_ctx, vs->audio_stream_idx, 0, AVSEEK_FLAG_BACKWARD);
+            }
+ 
+            vs->seek_flag = 0;
+        }
+        
+        int ret = 0;
+        if (av_read_frame(vs->fmt_ctx, &vs->pkt) >= 0) {
+            AVPacket orig_pkt = vs->pkt;
+            do {
+                ret = decode_packet(vs);
+                if (ret < 0)
+                    break;
+                vs->pkt.data += ret;
+                vs->pkt.size -= ret;
+            } while (vs->pkt.size > 0);
+    //        av_packet_unref(&orig_pkt);
+        }
+    }
 	return 0;
 }
 
@@ -252,6 +277,10 @@ int displayFrame(VideoState *vs){
     AVFrame *frame;
     frame = av_frame_alloc();
     if (packet_queue_get(&vs->videoqueue, &pkt, 0)){
+        if(pkt.data == flush_pkt.data) {
+            avcodec_flush_buffers(vs->video_stream->codec);
+            return 0;
+        }
         avcodec_decode_video2(vs->video_dec_ctx, frame, &gotframe, &pkt);
         if (gotframe) {
             frame->pts = av_frame_get_best_effort_timestamp(frame);
@@ -280,6 +309,12 @@ int queueAudio(VideoState *vs){
     int ret, decoded;
     frame = av_frame_alloc();
     if (packet_queue_get(&vs->audioqueue, &pkt, 0)){
+        if(pkt.data == flush_pkt.data) {
+            AVFormatContext avf;
+            avf = *vs->fmt_ctx;
+            avcodec_flush_buffers(vs->audio_stream->codec);
+            return 0;
+        }
         ret = avcodec_decode_audio4(vs->audio_dec_ctx, frame, &gotframe, &pkt);
         decoded = FFMIN(ret, pkt.size);
         if (gotframe){
@@ -317,101 +352,62 @@ int queueAudio(VideoState *vs){
     return 0;
 }
 
-Uint32 callback_queueAudio(Uint32 interval, void *param){
-    VideoState *vs = (VideoState *) param;
-    SDL_Event event;
-    SDL_UserEvent userevent;
 
-    /* In this example, our callback pushes an SDL_USEREVENT event
-    into the queue, and causes our callback to be called again at the
-    same interval: */
-
-    userevent.type = SDL_USEREVENT;
-    userevent.code = 2;
-    userevent.data1 = NULL;
-    userevent.data2 = NULL;
-    event.user = userevent;
-    event.type = SDL_USEREVENT;
-
-    if ( vs->queued_ms < 1000 ) // milliseconds of queuedAudio
-        queueAudio(vs);
-
-    return (interval);
-}
-
-Uint32 callback_displayFrame(Uint32 interval, void *param){
-    VideoState *vs = (VideoState *) param;
-    SDL_Event event;
-    SDL_UserEvent userevent;
-
-    /* In this example, our callback pushes an SDL_USEREVENT event
-    into the queue, and causes our callback to be called again at the
-    same interval: */
-
-    userevent.type = SDL_USEREVENT;
-    userevent.code = 1;
-    userevent.data1 = NULL;
-    userevent.data2 = NULL;
-    event.user = userevent;
-    event.type = SDL_USEREVENT;
-
-    Uint32 queued_size = SDL_GetQueuedAudioSize(dev);
-    int64_t queued_ns = 0;
-    int64_t queued_ms = 0;
-    if (vs->bytes_per_sample > 0)
-        queued_ns = (int64_t) ((double) queued_size / 2.0 / (double) vs->bytes_per_sample / 48000.0 * 1000000);
-    vs->queued_ms = (int64_t) queued_ns / 1000;
-    vs->queued_size = queued_size;
-
-    vs->delay = (last_audio_pts - queued_ns - vs->current_video_pts) / 1000;
-    vs->frame_total += 1;
-    Uint32 new_interval = (Uint32) ((vs->current_video_pts - vs->last_video_pts) / 1000);
-    if (new_interval > 0)
-        interval = new_interval;
-    vs->last_video_pts = vs->current_video_pts;
-    if (vs->delay < -100)
-        interval = interval + 3;
-    if (vs->delay > 100)
-        interval = interval - 3;
-
-    vs->interval = interval;
-//    SDL_PushEvent(&event);
-     displayFrame(vs);
-    if (vs->master_audio == 1)
-        queueAudio(vs);
-    return (interval);
-}
-
-Uint32 printPTS(Uint32 interval, void *arg){
-    VideoState *vs = (VideoState *) arg;
-    if (vs->interval > 0){
-        printf("interval %d   last_audio %d   current_video %d   delay %d\n", vs->interval, last_audio_pts, vs->current_video_pts, vs->delay);
-        printf("queued_size %d    queued_ms %d\n", vs->queued_size, vs->queued_ms);
+void printPTS(VideoState *vs){
+    while (quit_signal == 0){
+        if (vs->videoqueue.nb_packets > 0){
+            printf("%s\n", vs->src_filename);
+            printf("interval %d   last_audio %d   current_video %d   delay %d\n", vs->interval, last_audio_pts, vs->current_video_pts, vs->delay);
+            printf("queued_size %d    queued_ms %d\n", vs->queued_size, vs->queued_ms);
+            
+        }
+        SDL_Delay(500);
     }
-    return interval;
 }
+
 
 void displayFrame_thread(VideoState *vs){
-    while(vs->videoqueue.nb_packets > 0){
-        SDL_Delay(30);
+	int next_delay;
+    while(quit_signal == 0){
+        SDL_Delay(next_delay);
+        next_delay = 30;
+        if (vs->videoqueue.nb_packets > 0){
+            Uint32 queued_size = SDL_GetQueuedAudioSize(dev);
+            int64_t queued_ns = 0;
+            int64_t queued_ms = 0;
+            if (vs->bytes_per_sample > 0)
+                queued_ns = (int64_t) ((double) queued_size / 2.0 / (double) vs->bytes_per_sample / 48000.0 * 1000000);
+            vs->queued_ms = (int64_t) queued_ns / 1000;
+            vs->queued_size = queued_size;
 
-        Uint32 queued_size = SDL_GetQueuedAudioSize(dev);
-        int64_t queued_ns = 0;
-        int64_t queued_ms = 0;
-        if (vs->bytes_per_sample > 0)
-            queued_ns = (int64_t) ((double) queued_size / 2.0 / (double) vs->bytes_per_sample / 48000.0 * 1000000);
-        vs->queued_ms = (int64_t) queued_ns / 1000;
-        vs->queued_size = queued_size;
+            vs->delay = (last_audio_pts - queued_ns - vs->current_video_pts) / 1000;
+            if (vs->delay <  -50) {
+                next_delay += 5;
+            }
+            else if (vs->delay > 50) 
+                next_delay -= 5;
+            displayFrame(vs);
+        }
+	}
+}
 
-        vs->delay = (last_audio_pts - queued_ns - vs->current_video_pts) / 1000;
-        displayFrame(vs);
+void queueAudio_thread(VideoState *vs){
+	while (quit_signal == 0){
+        if (vs->audioqueue.nb_packets > 0){
+            if ( vs->queued_ms < 1000 ) // milliseconds of queuedAudio
+                queueAudio(vs);
+            SDL_Delay(20);
+        }
     }
 }
 
 int main(int argc, char **argv){
 	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
     av_register_all();
-
+    
+    av_init_packet(&flush_pkt);
+    flush_pkt.data = "FLUSH";
+    
     int v;
     int x_pos = 500;
     int y_pos = 200;
@@ -420,7 +416,7 @@ int main(int argc, char **argv){
     int looking_for_master_audio = 1;
     for (v=0; v < argc-1; v++){
         VideoState *vs;
-        vs = av_mallocz(sizeof(VideoState));
+        vs = av_mallocz (sizeof(VideoState));
         av_strlcpy(vs->src_filename, argv[v+1], sizeof(vs->src_filename));
         vs->frame_total = 0;
 
@@ -455,7 +451,7 @@ int main(int argc, char **argv){
         // initiate packetqueue
         packet_queue_init(&vs->videoqueue);
 
-
+        vs->seek_flag = 0;
         vs->last_video_pts = 0;
         vs->frame = av_frame_alloc();
         av_init_packet(&vs->pkt);
@@ -463,19 +459,33 @@ int main(int argc, char **argv){
         vs->pkt.size = 0;
         vs->bytes_per_sample = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
         vs->set_swrContext = 1;
-        decode_thread(vs);
+        SDL_CreateThread(decode_thread, "decodethread", vs);
+        SDL_CreateThread(displayFrame_thread, "displayframethread", vs);
+        SDL_CreateThread(printPTS, "printPTS", vs);
         if (vs->master_audio){
-            vs->timer_qA = SDL_AddTimer(20, callback_queueAudio, (void *) vs);
+            SDL_CreateThread(queueAudio_thread, "queueaudiothread", vs);
         }
         vs_array[v] = vs;
     }
-    for (v = 0; v < argc-1; v++){
-        vs_array[v]->thread = SDL_CreateThread(displayFrame_thread, "displayframethread", vs_array[v]);
+	
+//    int threadreturn;
+//    SDL_WaitThread(vs_array[0]->thread, threadreturn);
+	SDL_Event event;
+    quit_signal = 0;
+	seek_flag = 0;
+    while (quit_signal == 0){
+        if (SDL_PollEvent(&event)){
+            PrintEvent(&event);
+        }
+		if (seek_flag){
+            for (v = 0; v < argc-1; v++){
+//                int64_t seek_target= av_rescale_q(3000, AV_TIME_BASE_Q, vs_array[v]->video_stream->time_base);
+                vs_array[v]->seek_flag = 1;
+            }
+            seek_flag = 0;
+        }
+		SDL_Delay(5);
     }
-
-    int threadreturn;
-    SDL_WaitThread(vs_array[0]->thread, threadreturn);
-
 
 	SDL_Quit();
 	return 0;

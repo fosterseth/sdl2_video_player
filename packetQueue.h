@@ -14,10 +14,10 @@ void packet_queue_init(PacketQueue *q) {
   q->x = 'a';
 }
 
-int packet_queue_put(PacketQueue *q, AVPacket *pkt) {
+int packet_queue_put(PacketQueue *q, AVPacket *pkt, AVPacket *flush_pkt) {
 
   AVPacketList *pkt1;
-  if(av_dup_packet(pkt) < 0) {
+  if(pkt != flush_pkt && av_dup_packet(pkt) < 0) {
     return -1;
   }
   pkt1 = av_malloc(sizeof(AVPacketList));
@@ -67,4 +67,20 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block)
   }
   SDL_UnlockMutex(q->mutex);
   return ret;
+}
+
+static void packet_queue_flush(PacketQueue *q) {
+  AVPacketList *pkt, *pkt1;
+
+  SDL_LockMutex(q->mutex);
+  for(pkt = q->first_pkt; pkt != NULL; pkt = pkt1) {
+    pkt1 = pkt->next;
+    av_free_packet(&pkt->pkt);
+    av_freep(&pkt);
+  }
+  q->last_pkt = NULL;
+  q->first_pkt = NULL;
+  q->nb_packets = 0;
+  q->size = 0;
+  SDL_UnlockMutex(q->mutex);
 }
