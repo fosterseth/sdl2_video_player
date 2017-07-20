@@ -54,6 +54,8 @@ http://stackoverflow.com/questions/21007329/what-is-a-sdl-renderer/21007477#2100
 #include <SDL2/SDL_thread.h>
 #include <stdio.h>
 #include "packetQueue.h"
+#include <sys/socket.h>
+#include <netinet/in.h>
 
 typedef struct VideoState {
     char src_filename[1024];
@@ -105,8 +107,78 @@ int bytes_per_sample;
 int audio_sample_rate;
 float seek_amount;
 int seek_flag;
+int run_flag;
 AVPacket flush_pkt;
 FILE *fp;
+
+
+void read_from_client(){
+    int welcomeSocket, newSocket;
+    char buffer[1024];
+    struct sockaddr_in serverAddr;
+    struct sockaddr_storage serverStorage;
+    socklen_t addr_size;
+
+    /*---- Create the socket. The three arguments are: ----*/
+    /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
+    welcomeSocket = socket(PF_INET, SOCK_STREAM, 0);
+
+    /*---- Configure settings of the server address struct ----*/
+    /* Address family = Internet */
+    serverAddr.sin_family = AF_INET;
+    /* Set port number, using htons function to use proper byte order */
+    serverAddr.sin_port = htons(7891);
+    /* Set IP address to localhost */
+    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    /* Set all bits of the padding field to 0 */
+    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
+
+    /*---- Bind the address struct to the socket ----*/
+    bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
+
+    /*---- Listen on the socket, with 5 max connection requests queued ----*/
+    if(listen(welcomeSocket,1)==0)
+        printf("Listening\n");
+    else
+        printf("Error\n");
+
+    /*---- Accept call creates a new socket for the incoming connection ----*/
+    printf("connected\n");
+    addr_size = sizeof serverStorage;
+    newSocket = accept(welcomeSocket, (struct sockaddr *) &serverStorage, &addr_size);
+    memset(buffer, '\0', 1024);
+    /*---- Send message to the socket of the incoming connection ----*/
+    //  strcpy(buffer,"Hello World\n");
+    while(1){
+        printf("listening\n");
+        char buffer_str[1024];
+        int amt = read(newSocket, buffer, 1024);
+        strncpy(buffer_str, buffer, amt);
+        if (amt > 0){
+            printf("%s\n", buffer_str);
+            if (strcmp(buffer_str, "seek+") == 0){
+                seek_flag = 1;
+                seek_amount = 10.0;
+            }
+            if (strcmp(buffer_str, "seek-") == 0){
+                seek_flag = 1;
+                seek_amount = -10.0;
+            }
+            if (strcmp(buffer_str, "break") == 0){
+                quit_signal = 1;
+                break;
+            }
+        }
+        amt = 0;
+        SDL_Delay(1000);
+    }
+//        printf(buffer);
+//        if (strcmp(buffer, "break"))
+//            break;
+//        memset(buffer, '\0', 1024);
+    close(newSocket);
+    close(welcomeSocket);
+}
 
 void PrintEvent(const SDL_Event *event){
 	if (event->type == SDL_KEYDOWN){
@@ -130,6 +202,17 @@ void PrintEvent(const SDL_Event *event){
             printf("down\n");
             seek_flag = 1;
             seek_amount = -60.0;
+            break;
+        case SDLK_SPACE:
+            printf("space\n");
+            if (run_flag){
+                run_flag = 0;
+                SDL_PauseAudioDevice(dev, 1);
+            }
+            else{
+                SDL_PauseAudioDevice(dev, 0);
+                run_flag = 1;
+            }
             break;
         }
     }
@@ -352,95 +435,99 @@ int decode_thread(VideoState *vs){
 
 int displayFrame(VideoState *vs){
     /* decode video frame */
-    AVPacket pkt;
-    int gotframe;
-    AVFrame *frame;
-    frame = av_frame_alloc();
-    if (packet_queue_get(&vs->videoqueue, &pkt, 0)){
-        if(pkt.data == flush_pkt.data) {
-            avcodec_flush_buffers(vs->video_stream->codec);
-            vs->first_after_seek = 1;
-            return 0;
-        }
-        avcodec_decode_video2(vs->video_dec_ctx, frame, &gotframe, &pkt);
-        if (gotframe) {
-            frame->pts = av_frame_get_best_effort_timestamp(frame);
-            vs->current_video_pts = frame->pts;
-            vs->current_video_secs = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
-//            fprintf(fp, "video pts %d  secs %d\n", vs->current_video_pts, vs->current_video_secs);
-//            vs->current_video_pts = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
-            if (vs->first_after_seek){
-//                printPTSnow(vs);
-                vs->first_after_seek = 0;
+    if (run_flag){
+        AVPacket pkt;
+        int gotframe;
+        AVFrame *frame;
+        frame = av_frame_alloc();
+        if (packet_queue_get(&vs->videoqueue, &pkt, 0)){
+            if(pkt.data == flush_pkt.data) {
+                avcodec_flush_buffers(vs->video_stream->codec);
+                vs->first_after_seek = 1;
+                return 0;
             }
-            SDL_UpdateYUVTexture(vs->Texture,
-                                    NULL,
-                                    frame->data[0],
-                                    frame->linesize[0],
-                                    frame->data[1],
-                                    frame->linesize[1],
-                                    frame->data[2],
-                                    frame->linesize[2]);
-            SDL_RenderCopy(vs->Renderer, vs->Texture, NULL, NULL);
-            SDL_RenderPresent(vs->Renderer);
+            avcodec_decode_video2(vs->video_dec_ctx, frame, &gotframe, &pkt);
+            if (gotframe) {
+                frame->pts = av_frame_get_best_effort_timestamp(frame);
+                vs->current_video_pts = frame->pts;
+                vs->current_video_secs = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
+    //            fprintf(fp, "video pts %d  secs %d\n", vs->current_video_pts, vs->current_video_secs);
+    //            vs->current_video_pts = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
+                if (vs->first_after_seek){
+    //                printPTSnow(vs);
+                    vs->first_after_seek = 0;
+                }
+                SDL_UpdateYUVTexture(vs->Texture,
+                                        NULL,
+                                        frame->data[0],
+                                        frame->linesize[0],
+                                        frame->data[1],
+                                        frame->linesize[1],
+                                        frame->data[2],
+                                        frame->linesize[2]);
+                SDL_RenderCopy(vs->Renderer, vs->Texture, NULL, NULL);
+                SDL_RenderPresent(vs->Renderer);
+            }
         }
+        //av_packet_unref(&pkt);
+        //av_free(frame);
     }
-    //av_packet_unref(&pkt);
-    //av_free(frame);
-	return 0;
+    return 0;
 }
 
 int queueAudio(VideoState *vs){
-    AVPacket pkt;
-    int gotframe;
-    AVFrame *frame;
-    int ret, decoded;
-    frame = av_frame_alloc();
-    if (packet_queue_get(&vs->audioqueue, &pkt, 0)){
-        if(pkt.data == flush_pkt.data) {
-            avcodec_flush_buffers(vs->audio_stream->codec);
-            swr_free(&vs->swr);
-            vs->set_swrContext = 1;
-            return 0;
-        }
-        
-        ret = avcodec_decode_audio4(vs->audio_dec_ctx, frame, &gotframe, &pkt);
-        decoded = FFMIN(ret, pkt.size);
-        if (gotframe){
-            if (vs->set_swrContext){
-                // initiate resample context
-                SwrContext *swr = swr_alloc();
-                av_opt_set_channel_layout(swr, "in_channel_layout",  frame->channel_layout, 0);
-                av_opt_set_channel_layout(swr, "out_channel_layout", AV_CH_LAYOUT_STEREO,  0);
-                av_opt_set_int(swr, "in_sample_rate",     frame->sample_rate,                0);
-                av_opt_set_int(swr, "out_sample_rate",    frame->sample_rate,                0);
-                av_opt_set_sample_fmt(swr, "in_sample_fmt",  frame->format, 0);
-                av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_S16,  0);
-                swr_init(swr);
-                vs->swr = swr;
-                vs->set_swrContext = 0;
+    if (run_flag){
+        AVPacket pkt;
+        int gotframe;
+        AVFrame *frame;
+        int ret, decoded;
+        frame = av_frame_alloc();
+        if (packet_queue_get(&vs->audioqueue, &pkt, 0)){
+            if(pkt.data == flush_pkt.data) {
+                avcodec_flush_buffers(vs->audio_stream->codec);
+                swr_free(&vs->swr);
+                vs->set_swrContext = 1;
+                return 0;
             }
+            
+            ret = avcodec_decode_audio4(vs->audio_dec_ctx, frame, &gotframe, &pkt);
+            decoded = FFMIN(ret, pkt.size);
+            if (gotframe){
+                if (vs->set_swrContext){
+                    // initiate resample context
+                    SwrContext *swr = swr_alloc();
+                    av_opt_set_channel_layout(swr, "in_channel_layout",  frame->channel_layout, 0);
+                    av_opt_set_channel_layout(swr, "out_channel_layout", AV_CH_LAYOUT_STEREO,  0);
+                    av_opt_set_int(swr, "in_sample_rate",     frame->sample_rate,                0);
+                    av_opt_set_int(swr, "out_sample_rate",    frame->sample_rate,                0);
+                    av_opt_set_sample_fmt(swr, "in_sample_fmt",  frame->format, 0);
+                    av_opt_set_sample_fmt(swr, "out_sample_fmt", AV_SAMPLE_FMT_S16,  0);
+                    swr_init(swr);
+                    vs->swr = swr;
+                    vs->set_swrContext = 0;
+                }
 
-            frame->pts = av_frame_get_best_effort_timestamp(frame);
-            last_audio_pts = frame->pts;
-            last_audio_secs = av_rescale_q(frame->pts, vs->audio_stream->time_base, AV_TIME_BASE_Q);
-//            last_audio_secs = av_rescale_q(frame->pts, (AVRational){1,16000}, AV_TIME_BASE_Q);
-//            fprintf(fp, "audio pts %d  secs %d\n", last_audio_pts, last_audio_secs);
-            vs->last_audio_pts = last_audio_pts;
-            vs->last_audio_secs = last_audio_secs;
-//            sprintf(vs->printlog, "frame pts %d   last audio pts %d", frame->pts, last_audio_pts);
-            uint8_t *output;
-//            int out_samples = av_rescale_rnd(swr_get_delay(vs->swr, 48000) + frame->nb_samples, 44100, 48000, AV_ROUND_UP);
-            int out_samples = frame->nb_samples;
-            av_samples_alloc(&output, NULL, 2, out_samples, AV_SAMPLE_FMT_S16, 0);
-            out_samples = swr_convert(vs->swr, &output, out_samples, frame->data, frame->nb_samples);
+                frame->pts = av_frame_get_best_effort_timestamp(frame);
+                last_audio_pts = frame->pts;
+                last_audio_secs = av_rescale_q(frame->pts, vs->audio_stream->time_base, AV_TIME_BASE_Q);
+    //            last_audio_secs = av_rescale_q(frame->pts, (AVRational){1,16000}, AV_TIME_BASE_Q);
+    //            fprintf(fp, "audio pts %d  secs %d\n", last_audio_pts, last_audio_secs);
+                vs->last_audio_pts = last_audio_pts;
+                vs->last_audio_secs = last_audio_secs;
+    //            sprintf(vs->printlog, "frame pts %d   last audio pts %d", frame->pts, last_audio_pts);
+                uint8_t *output;
+    //            int out_samples = av_rescale_rnd(swr_get_delay(vs->swr, 48000) + frame->nb_samples, 44100, 48000, AV_ROUND_UP);
+                int out_samples = frame->nb_samples;
+                av_samples_alloc(&output, NULL, 2, out_samples, AV_SAMPLE_FMT_S16, 0);
+                out_samples = swr_convert(vs->swr, &output, out_samples, frame->data, frame->nb_samples);
 
-            size_t unpadded_linesize = out_samples * bytes_per_sample;
-//            fprintf(fp, "dev %d", SDL_GetQueuedAudioSize(dev));
-//            fprintf(fp, "queuing %d\n", pkt.pts);
-            SDL_QueueAudio(dev, output, unpadded_linesize*2);
-//            printf("just_queued    %d     bytes    %d\n", SDL_GetQueuedAudioSize(vs->dev), unpadded_linesize * 2);
-            av_freep(&output);
+                size_t unpadded_linesize = out_samples * bytes_per_sample;
+    //            fprintf(fp, "dev %d", SDL_GetQueuedAudioSize(dev));
+    //            fprintf(fp, "queuing %d\n", pkt.pts);
+                SDL_QueueAudio(dev, output, unpadded_linesize*2);
+    //            printf("just_queued    %d     bytes    %d\n", SDL_GetQueuedAudioSize(vs->dev), unpadded_linesize * 2);
+                av_freep(&output);
+            }
         }
     }
    // av_packet_unref(&pkt);
@@ -575,7 +662,7 @@ int main(int argc, char **argv){
         vs->set_swrContext = 1;
         SDL_CreateThread(decode_thread, "decodethread", vs);
         SDL_CreateThread(displayFrame_thread, "displayframethread", vs);
-        SDL_CreateThread(printPTS, "printPTS", vs);
+//        SDL_CreateThread(printPTS, "printPTS", vs);
         if (vs->master_audio){
 //            SDL_CreateThread(printPTS, "printPTS", vs);
             SDL_CreateThread(queueAudio_thread, "queueaudiothread", vs);
@@ -583,12 +670,14 @@ int main(int argc, char **argv){
         av_strlcpy(vs->printlog, "printlog", sizeof(vs->printlog));
         vs_array[v] = vs;
     }
+    SDL_CreateThread(read_from_client, "read_from_client", NULL);
 	
 //    int threadreturn;
 //    SDL_WaitThread(vs_array[0]->thread, threadreturn);
 	SDL_Event event;
     quit_signal = 0;
 	seek_flag = 0;
+    run_flag = 1;
     while (quit_signal == 0){
         if (SDL_PollEvent(&event)){
             PrintEvent(&event);
