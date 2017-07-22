@@ -115,7 +115,7 @@ FILE *fp;
 int x_pos;
 int y_pos;
 int looking_for_master_audio;
-
+Uint32 userEventType;
 
 void read_from_client(){
     int welcomeSocket, newSocket;
@@ -141,18 +141,6 @@ void read_from_client(){
     /*---- Bind the address struct to the socket ----*/
     bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
 
-//    /*---- Listen on the socket, with 5 max connection requests queued ----*/
-//    if(listen(welcomeSocket,5)==0)
-//        printf("Listening\n");
-//    else
-//        printf("Error\n");
-
-    /*---- Accept call creates a new socket for the incoming connection ----*/
-//    printf("connected\n");
-//    addr_size = sizeof serverStorage;
-//    newSocket = accept(welcomeSocket, (struct sockaddr *) &serverStorage, &addr_size);
-    /*---- Send message to the socket of the incoming connection ----*/
-    //  strcpy(buffer,"Hello World\n");
     while(1){
         printf("listening\n");
         char buffer_str[1024];
@@ -163,24 +151,24 @@ void read_from_client(){
             strncpy(buffer_str, buffer, amt);
             printf("%s\n", buffer_str);
             if (strcmp(buffer_str, "seek+") == 0){
-                seek_flag = 1;
                 seek_amount = 10.0;
+                set_seek();
             }
             if (strcmp(buffer_str, "seek-") == 0){
-                seek_flag = 1;
                 seek_amount = -10.0;
+                set_seek();
             }
             if (strcmp(buffer_str, "break") == 0){
                 quit_signal = 1;
                 break;
             }
             if (strncmp(buffer_str, "open", 4) == 0){
-                char filename[1024];
+                char *filename;
+                filename = av_mallocz(1024);
                 memset(filename, '\0', 1024);
                 strcpy(filename, buffer_str+5);
                 printf("opening %s\n", filename);
-                open_file(filename);
-                memset(filename, '\0', 1024);
+                push_open_file(filename);
             }
         }
         amt = 0;
@@ -192,44 +180,6 @@ void read_from_client(){
 //        memset(buffer, '\0', 1024);
     close(newSocket);
     close(welcomeSocket);
-}
-
-void PrintEvent(const SDL_Event *event){
-	if (event->type == SDL_KEYDOWN){
-      switch (event->key.keysym.sym) {
-        case SDLK_LEFT:
-            printf("left\n");
-            seek_flag = 1;
-            seek_amount = -10.0;
-            break;
-        case SDLK_RIGHT:
-            printf("right\n");
-            seek_flag = 1;
-            seek_amount = 10.0;
-            break;
-        case SDLK_UP:
-            printf("up\n");
-            seek_flag = 1;
-            seek_amount = 60.0;
-            break;
-        case SDLK_DOWN:
-            printf("down\n");
-            seek_flag = 1;
-            seek_amount = -60.0;
-            break;
-        case SDLK_SPACE:
-            printf("space\n");
-            if (run_flag){
-                run_flag = 0;
-                SDL_PauseAudioDevice(dev, 1);
-            }
-            else{
-                SDL_PauseAudioDevice(dev, 0);
-                run_flag = 1;
-            }
-            break;
-        }
-    }
 }
 
 static int open_codec_context(int *stream_idx,
@@ -527,7 +477,7 @@ void displayFrame_thread(VideoState *vs){
             else if (vs->delay > 50) 
                 next_delay -= 5;
             sprintf(vs->printlog, "curr_audio %d video %d queued %d delay %d next_delay %d",curr_audio_secs, vs->current_video_secs, vs->queued_ms, vs->delay, next_delay);
-            fprintf(fp, "last_audio_secs %d current_video_secs %d queued_ns %d queued_size %d\n", last_audio_secs, vs->current_video_secs, queued_ns, queued_size);
+//            fprintf(fp, "last_audio_secs %d current_video_secs %d queued_ns %d queued_size %d\n", last_audio_secs, vs->current_video_secs, queued_ns, queued_size);
 //            SDL_PauseAudioDevice(dev, 0);
             displayFrame(vs);
         }
@@ -544,13 +494,14 @@ void queueAudio_thread(VideoState *vs){
     }
 }
 
-int open_file(char filename[1024]){
+int open_file(char *filename){
 
 //    char window_name[80];
     
     VideoState *vs;
     vs = av_mallocz (sizeof(VideoState));
     av_strlcpy(vs->src_filename, filename, sizeof(vs->src_filename));
+    av_freep(&filename);
     vs->frame_total = 0;
 
     if (avformat_open_input(&vs->fmt_ctx, vs->src_filename, NULL, NULL) != 0){
@@ -614,9 +565,65 @@ int open_file(char filename[1024]){
     return 0;
 }
 
-int main(int argc, char **argv){
-    fp = fopen("/home/sbf/Desktop/log.txt", "w");
-	SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
+void handleEvent(const SDL_Event *event){
+    if (event->type == userEventType){
+        open_file(event->user.data1);
+    }
+	if (event->type == SDL_KEYDOWN){
+      switch (event->key.keysym.sym) {
+        case SDLK_LEFT:
+            printf("left\n");
+            seek_amount = -10.0;
+            set_seek();
+            break;
+        case SDLK_RIGHT:
+            printf("right\n");
+            seek_amount = 10.0;
+            set_seek();
+            break;
+        case SDLK_UP:
+            printf("up\n");
+            seek_amount = 60.0;
+            set_seek();
+            break;
+        case SDLK_DOWN:
+            printf("down\n");
+            seek_amount = -60.0;
+            set_seek();
+            break;
+        case SDLK_SPACE:
+            printf("space\n");
+            if (run_flag){
+                run_flag = 0;
+                SDL_PauseAudioDevice(dev, 1);
+            }
+            else{
+                SDL_PauseAudioDevice(dev, 0);
+                run_flag = 1;
+            }
+            break;
+        }
+    }
+}
+
+void push_open_file(char filename[1024]){
+    SDL_Event event;
+    SDL_zero(event);
+    event.type = userEventType;
+    event.user.data1 = filename;
+    event.user.data2 = 0;
+    SDL_PushEvent(&event);
+}
+
+void set_seek(){
+    int v;
+    for (v = 0; v < num_files; v++){
+        vs_array[v]->seek_flag = 1;
+    }
+}
+
+int main(int argc, char *argv[]){
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER | SDL_INIT_EVENTS);
     av_register_all();
     
     av_init_packet(&flush_pkt);
@@ -630,9 +637,13 @@ int main(int argc, char **argv){
     
     SDL_CreateThread(read_from_client, "read_from_client", NULL);
 	
+    userEventType = SDL_RegisterEvents(1);
     int v;
     for (v=0; v<argc-1; v++){
-        open_file(argv[v+1]);
+        char *filename;
+        filename = av_mallocz(1024);
+        strcpy(filename, argv[v+1]);
+        push_open_file(filename);
     }
     
 	SDL_Event event;
@@ -641,14 +652,7 @@ int main(int argc, char **argv){
     run_flag = 1;
     while (quit_signal == 0){
         if (SDL_PollEvent(&event)){
-            PrintEvent(&event);
-        }
-		if (seek_flag){
-            fprintf(fp, "\nseeking\n\n");
-            for (v = 0; v < num_files; v++){
-                vs_array[v]->seek_flag = seek_flag;
-            }
-            seek_flag = 0;
+            handleEvent(&event);
         }
 		SDL_Delay(5);
     }
