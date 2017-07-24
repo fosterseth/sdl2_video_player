@@ -87,6 +87,7 @@ typedef struct VideoState {
     int master_audio;
     int seek_flag;
     int first_after_seek;
+    int seek_to_flag;
     SDL_Renderer *Renderer;
     SDL_Window *Window;
     SDL_Texture *Texture;
@@ -116,6 +117,7 @@ int x_pos;
 int y_pos;
 int looking_for_master_audio;
 Uint32 userEventType;
+int64_t *master_video_secs;
 
 void read_from_client(){
     int welcomeSocket, newSocket;
@@ -298,7 +300,14 @@ int decode_thread(VideoState *vs){
     while (quit_signal == 0){
         SDL_Delay(5);
         if (vs->seek_flag){
-            int64_t seek_pos = vs->current_video_secs + (int64_t)(seek_amount * 1000000);
+            int64_t seek_pos;
+            if (vs->seek_to_flag){
+                seek_pos = *master_video_secs;
+                vs->seek_to_flag = 0;
+            }
+            else{
+                seek_pos = vs->current_video_secs + (int64_t)(seek_amount * 1000000);
+            }
 //            seek_pos = 50000000;
             seek_pos = av_rescale_q(seek_pos, AV_TIME_BASE_Q, vs->video_stream->time_base);
             av_seek_frame(vs->fmt_ctx, vs->video_stream_idx, seek_pos, 0);
@@ -542,8 +551,16 @@ int open_file(char *filename){
     y_pos += 50;
     // initiate packetqueue
     packet_queue_init(&vs->videoqueue);
-
+    
     vs->seek_flag = 0;
+    vs->seek_to_flag = 0;
+    if (num_files == 0)
+        master_video_secs = &vs->current_video_secs;
+    else{
+        vs->seek_flag = 1;
+        vs->seek_to_flag = 1;
+    }
+    
     vs->last_video_pts = 0;
     vs->frame = av_frame_alloc();
     av_init_packet(&vs->pkt);
