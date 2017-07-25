@@ -78,6 +78,8 @@ typedef struct VideoState {
     int64_t queued_ms;
     int64_t frame_time;
     int64_t last_audio_secs;
+    int64_t seek_to_secs;
+    int seek_flag;
     int set_swrContext;
     int audio_stream_idx;
     int video_stream_idx;
@@ -85,9 +87,7 @@ typedef struct VideoState {
     int video_frame_count;
     int frame_total;
     int master_audio;
-    int seek_flag;
     int first_after_seek;
-    int seek_to_flag;
     SDL_Renderer *Renderer;
     SDL_Window *Window;
     SDL_Texture *Texture;
@@ -106,8 +106,6 @@ int64_t last_audio_pts;
 int64_t last_audio_secs;
 int bytes_per_sample;
 int audio_sample_rate;
-float seek_amount;
-int seek_flag;
 int run_flag;
 AVPacket flush_pkt;
 VideoState *vs_array[20];
@@ -142,7 +140,7 @@ void read_from_client(){
 
     /*---- Bind the address struct to the socket ----*/
     bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
-
+    double seek_amount;
     while(1){
         printf("listening\n");
         char buffer_str[1024];
@@ -153,12 +151,10 @@ void read_from_client(){
             strncpy(buffer_str, buffer, amt);
             printf("%s\n", buffer_str);
             if (strcmp(buffer_str, "seek+") == 0){
-                seek_amount = 10.0;
-                set_seek();
+                set_seek_change(10.0);
             }
             if (strcmp(buffer_str, "seek-") == 0){
-                seek_amount = -10.0;
-                set_seek();
+                set_seek_change(-10.0);
             }
             if (strcmp(buffer_str, "break") == 0){
                 quit_signal = 1;
@@ -168,9 +164,13 @@ void read_from_client(){
                 char *filename;
                 filename = av_mallocz(1024);
                 memset(filename, '\0', 1024);
-                strcpy(filename, buffer_str+5);
+                strcpy(filename, &buffer_str[5]);
                 printf("opening %s\n", filename);
                 push_open_file(filename);
+            }
+            if (strncmp(buffer_str, "seekto", 6) == 0){
+                seek_amount = atof(&buffer_str[7]);
+                set_seek_secs(seek_amount);
             }
         }
         amt = 0;
@@ -300,16 +300,7 @@ int decode_thread(VideoState *vs){
     while (quit_signal == 0){
         SDL_Delay(5);
         if (vs->seek_flag){
-            int64_t seek_pos;
-            if (vs->seek_to_flag){
-                seek_pos = *master_video_secs;
-                vs->seek_to_flag = 0;
-            }
-            else{
-                seek_pos = vs->current_video_secs + (int64_t)(seek_amount * 1000000);
-            }
-//            seek_pos = 50000000;
-            seek_pos = av_rescale_q(seek_pos, AV_TIME_BASE_Q, vs->video_stream->time_base);
+            int64_t seek_pos = av_rescale_q(vs->seek_to_secs, AV_TIME_BASE_Q, vs->video_stream->time_base);
             av_seek_frame(vs->fmt_ctx, vs->video_stream_idx, seek_pos, 0);
             packet_queue_flush(&vs->videoqueue);
             packet_queue_put(&vs->videoqueue, &flush_pkt, &flush_pkt);
@@ -553,12 +544,12 @@ int open_file(char *filename){
     packet_queue_init(&vs->videoqueue);
     
     vs->seek_flag = 0;
-    vs->seek_to_flag = 0;
+    vs->seek_to_secs = 0;
     if (num_files == 0)
         master_video_secs = &vs->current_video_secs;
     else{
         vs->seek_flag = 1;
-        vs->seek_to_flag = 1;
+        vs->seek_to_secs = *master_video_secs;
     }
     
     vs->last_video_pts = 0;
@@ -583,6 +574,7 @@ int open_file(char *filename){
 }
 
 void handleEvent(const SDL_Event *event){
+    double seek_amount;
     if (event->type == userEventType){
         open_file(event->user.data1);
     }
@@ -591,22 +583,22 @@ void handleEvent(const SDL_Event *event){
         case SDLK_LEFT:
             printf("left\n");
             seek_amount = -10.0;
-            set_seek();
+            set_seek_change(seek_amount);
             break;
         case SDLK_RIGHT:
             printf("right\n");
             seek_amount = 10.0;
-            set_seek();
+            set_seek_change(seek_amount);
             break;
         case SDLK_UP:
             printf("up\n");
-            seek_amount = 60.0;
-            set_seek();
+            seek_amount = -60.0;
+            set_seek_change(seek_amount);
             break;
         case SDLK_DOWN:
             printf("down\n");
-            seek_amount = -60.0;
-            set_seek();
+            seek_amount = 60.0;
+            set_seek_change(seek_amount);
             break;
         case SDLK_SPACE:
             printf("space\n");
@@ -632,10 +624,20 @@ void push_open_file(char filename[1024]){
     SDL_PushEvent(&event);
 }
 
-void set_seek(){
+void set_seek_change(double seek_change_secs){
+    set_seek(*master_video_secs + (int64_t)(seek_change_secs * 1000000));
+}
+
+void set_seek_secs(double seek_to_secs){
+    set_seek((int64_t)(seek_to_secs * 1000000));
+}
+
+
+void set_seek(int64_t seek_to_secs){
     int v;
     for (v = 0; v < num_files; v++){
         vs_array[v]->seek_flag = 1;
+        vs_array[v]->seek_to_secs = seek_to_secs;
     }
 }
 
@@ -665,7 +667,6 @@ int main(int argc, char *argv[]){
     
 	SDL_Event event;
     quit_signal = 0;
-	seek_flag = 0;
     run_flag = 1;
     while (quit_signal == 0){
         if (SDL_PollEvent(&event)){
