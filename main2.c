@@ -54,8 +54,9 @@ http://stackoverflow.com/questions/21007329/what-is-a-sdl-renderer/21007477#2100
 #include <SDL2/SDL_thread.h>
 #include <stdio.h>
 #include "packetQueue.h"
-#include <sys/socket.h>
-#include <netinet/in.h>
+//#include <sys/socket.h>  // linux
+#include <winsock2.h> // mingw64
+//#include <netinet/in.h> // linux
 
 typedef struct VideoState {
     char src_filename[1024];
@@ -117,36 +118,79 @@ int looking_for_master_audio;
 Uint32 userEventType;
 int64_t *master_video_secs;
 
+
 void read_from_client(){
-    int welcomeSocket, newSocket;
-    char buffer[1024];
-    struct sockaddr_in serverAddr;
-    struct sockaddr_storage serverStorage;
-    socklen_t addr_size;
-
-    /*---- Create the socket. The three arguments are: ----*/
-    /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
-    welcomeSocket = socket(PF_INET, SOCK_DGRAM, 0);
-
-    /*---- Configure settings of the server address struct ----*/
-    /* Address family = Internet */
-    serverAddr.sin_family = AF_INET;
-    /* Set port number, using htons function to use proper byte order */
-    serverAddr.sin_port = htons(7893);
-    /* Set IP address to localhost */
-    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    /* Set all bits of the padding field to 0 */
-    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
-
-    /*---- Bind the address struct to the socket ----*/
-    bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
+    int slen;
+    SOCKET s;
+    struct sockaddr_in server, si_other;
+    WSADATA wsa;
+    slen = sizeof(si_other) ;
+        //Initialise winsock
+    printf("\nInitialising Winsock...");
+    if (WSAStartup(MAKEWORD(2,2),&wsa) != 0)
+    {
+        printf("Failed. Error Code : %d",WSAGetLastError());
+        exit(EXIT_FAILURE);
+    }
+    printf("Initialised.\n");
+        //Create a socket
+    if((s = socket(AF_INET , SOCK_DGRAM , 0 )) == INVALID_SOCKET)
+    {
+        printf("Could not create socket : %d" , WSAGetLastError());
+    }
+    printf("Socket created.\n");
+     
+    //Prepare the sockaddr_in structure
+    server.sin_family = AF_INET;
+    server.sin_addr.s_addr = INADDR_ANY;
+    server.sin_port = htons( 7377 );
+    
+        //Bind
+    if( bind(s ,(struct sockaddr *)&server , sizeof(server)) == SOCKET_ERROR)
+    {
+        printf("Bind failed with error code : %d" , WSAGetLastError());
+        exit(EXIT_FAILURE);
+    }
+    puts("Bind done");
+    
+//    int welcomeSocket, newSocket;
+//    char buffer[1024];
+//    struct sockaddr_in serverAddr;
+//    struct sockaddr_storage serverStorage;
+//    socklen_t addr_size;
+//
+//    /*---- Create the socket. The three arguments are: ----*/
+//    /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
+//    welcomeSocket = socket(PF_INET, SOCK_DGRAM, 0);
+//
+//    /*---- Configure settings of the server address struct ----*/
+//    /* Address family = Internet */
+//    serverAddr.sin_family = AF_INET;
+//    /* Set port number, using htons function to use proper byte order */
+//    serverAddr.sin_port = htons(7893);
+//    /* Set IP address to localhost */
+//    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+//    /* Set all bits of the padding field to 0 */
+//    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
+//
+//    /*---- Bind the address struct to the socket ----*/
+//    bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
     double seek_amount;
+    int amt;
     while(1){
         printf("listening\n");
         char buffer_str[1024];
+        char buffer[1024];
         memset(buffer_str, '\0', 1024);
         memset(buffer, '\0', 1024);
-        int amt = read(welcomeSocket, buffer, 1024);
+//        int amt = read(welcomeSocket, buffer, 1024);
+                //try to receive some data, this is a blocking call
+        if ((amt = recvfrom(s, buffer, 1024, 0, (struct sockaddr *) &si_other, &slen)) == SOCKET_ERROR)
+        {
+            printf("recvfrom() failed with error code : %d" , WSAGetLastError());
+            exit(EXIT_FAILURE);
+        }
+        
         if (amt > 0){
             strncpy(buffer_str, buffer, amt);
             printf("%s\n", buffer_str);
@@ -180,8 +224,8 @@ void read_from_client(){
 //        if (strcmp(buffer, "break"))
 //            break;
 //        memset(buffer, '\0', 1024);
-    close(newSocket);
-    close(welcomeSocket);
+    closesocket(s);
+    WSACleanup();
 }
 
 static int open_codec_context(int *stream_idx,
