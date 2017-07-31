@@ -216,6 +216,14 @@ void read_from_client(){
                 seek_amount = atof(&buffer_str[7]);
                 set_seek_secs(seek_amount);
             }
+            if (strncmp(buffer_str, "pause", 5) == 0){
+                    run_flag = 0;
+                    SDL_PauseAudioDevice(dev, 1);
+            }
+            if (strncmp(buffer_str, "play", 4) == 0){
+                SDL_PauseAudioDevice(dev, 0);
+                run_flag = 1;
+            }
         }
         amt = 0;
         SDL_Delay(50);
