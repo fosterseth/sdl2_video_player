@@ -4,8 +4,10 @@ import socket
 import os
 
 import matplotlib
+from matplotlib import gridspec
 import matplotlib.pyplot as plt
 import matplotlib.patches as pat
+import matplotlib.animation as animation
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
@@ -140,49 +142,76 @@ def destroy():
     root.destroy()
 
 
-def add_variable(filename, ax, axc):
+def add_variable(filename, ax, axc, axname):
     print(filename)
     bot, top = ax.get_ylim()
     data = load_matfile("derived/" + filename)
     draw_rects(data, ax, top)
     if bot < 0:
         ax.set_ylim(bottom=0, top=10.5)
+        axname.set_ylim(bottom=0, top=10.5)
+        top = 10.5
     else:
         ax.set_ylim(top=top+10.5)
+        axname.set_ylim(top=top+10.5)
+        top = top + 10.5
     ax.set_xlim(left=data[0, 0], right=data[-1, 1])
     axc.set_xlim(left=data[0, 0], right=data[-1, 1])
+    axname.add_patch(pat.Rectangle((0,top-8), 1, 4, color="orange"))
+    axname.text(0,top-6.5, filename)
     ax.figure.canvas.draw()
 
 root = Tk.Tk()
 root.wm_title("Embedding in TK")
-framecontainer = Tk.Frame(master=root)
-frameleft = Tk.Frame(master=framecontainer, bg="blue")
-frameright = Tk.Frame(master=framecontainer, width = 300, bg="red")
-framescroll = Tk.Frame(master=framecontainer)
-framebottom = Tk.Frame(master=root)
+window = Tk.Toplevel(master=root)
+windowLEFT = Tk.Frame(master=window, bg="red")
+windowRIGHT = Tk.Frame(master=window, bg="green")
+rootTOP = Tk.Frame(master=root)
+rootBOT = Tk.Frame(master=root)
 
 plt.close('all')
 
 # Just a figure and one subplot
 
-f = plt.figure(figsize=(8,4))
-ax = f.add_subplot(211)
+f = plt.figure(figsize=(8,3))
+gs = gridspec.GridSpec(2,2, width_ratios = [10,1], height_ratios = [5,1])
+gs.update(left=0.01, right=0.99, wspace=0.01)
+ax = plt.subplot(gs[0,0])
+
+axname = plt.subplot(gs[0,1])
+axname.set_ylim(bottom=0, top=10.5)
+axname.set_xlim(left=0, right=1)
+axname.axis('off')
+
 
 ax.set_title('Simple plot')
 ax.set_ylim(bottom=-1, top=0)
+ax.set_yticklabels([])
+ax.set_yticks([])
 
-axc = f.add_subplot(212)
+axc = plt.subplot(gs[1,0])
 axc.set_ylim(bottom=0, top=10)
+axc.set_yticklabels([])
+axc.set_yticks([])
 
-add_variable("cevent_eye_roi_child.mat", ax, axc)
+add_variable("cevent_eye_roi_child.mat", ax, axc, axname)
 
 
 ctrl_bar = axc.add_patch(pat.Rectangle((30, 0), 10, 10, color=colors[1]))
 dr = DraggableRectangle(ctrl_bar, ax, f)
 
+ctrl_marker = axc.add_patch(pat.Rectangle((50, 0), 2, 2, color="red"))
+
+def update_marker(event):
+    command = "gettime"
+    # sock.sendto(command.encode(), server_address)
+    # rec = sock.recv(20)
+    # rec = float(rec)
+    x = ctrl_marker.get_x()
+    ctrl_marker.set_x(x+0.1)
 
 # a tk.DrawingArea
-canvas = FigureCanvasTkAgg(f, master=frameleft)
+canvas = FigureCanvasTkAgg(f, master=rootTOP)
 canvas.show()
 # canvas.get_tk_widget().pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
 
@@ -190,12 +219,12 @@ canvas._tkcanvas.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
 canvas.mpl_connect('button_press_event', lambda event: onclick(event, ax))
 dr.connect()
 
-buttonQuit = Tk.Button(master=framebottom, text='Quit', command = destroy)
-buttonQuit.pack(side=Tk.RIGHT)
+buttonQuit = Tk.Button(master=rootBOT, text='Quit', command = destroy)
+buttonQuit.pack(side=Tk.LEFT)
 
-buttonPlay = Tk.Button(master=framebottom, text='Play', command = playvideo).pack(side=Tk.LEFT)
-buttonPause = Tk.Button(master=framebottom, text='Pause', command = pausevideo).pack(side=Tk.LEFT)
-buttonOpenvideos = Tk.Button(master=framebottom, text='OpenVideos', command = openvideos).pack(side=Tk.LEFT)
+buttonPlay = Tk.Button(master=rootBOT, text='Play', command = playvideo).pack(side=Tk.LEFT)
+buttonPause = Tk.Button(master=rootBOT, text='Pause', command = pausevideo).pack(side=Tk.LEFT)
+buttonOpenvideos = Tk.Button(master=rootBOT, text='OpenVideos', command = openvideos).pack(side=Tk.LEFT)
 
 # File Management
 files = os.listdir('derived')
@@ -204,11 +233,12 @@ def listbox_callback(event, ax, axc):
     if event.keysym == 'Return':
         idx = listbox.curselection()
         filename = listbox.get(idx)
-        add_variable(filename, ax, axc)
+        add_variable(filename, ax, axc, axname)
 
 
-scrollbar = Tk.Scale(master=framescroll, orient=Tk.VERTICAL, from_=0, to=len(files))
-listbox = Tk.Listbox(master=frameright)
+scrollbary = Tk.Scale(master=windowRIGHT, orient=Tk.VERTICAL, from_=0, to=len(files))
+scrollbarx = Tk.Scale(master=windowLEFT, orient=Tk.HORIZONTAL, from_=0, to=50)
+listbox = Tk.Listbox(master=windowLEFT)
 listbox.bind('<Key>', lambda event: listbox_callback(event, ax, axc))
 
 def search_files(text):
@@ -235,23 +265,28 @@ def entry_callback(event):
     update_listbox(text)
 
 
-entry = Tk.Entry(master=frameright)
+entry = Tk.Entry(master=windowLEFT)
 entry.bind('<Key>', entry_callback)
 
 
 for f in files:
     listbox.insert(Tk.END, f)
 
-frameleft.pack(side=Tk.LEFT, fill=Tk.BOTH, expand = 1)
-frameright.pack(side=Tk.LEFT, fill=Tk.BOTH, expand = 1)
-framescroll.pack(side=Tk.RIGHT, fill=Tk.Y)
-framebottom.pack(side=Tk.BOTTOM)
-framecontainer.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
 
-listbox.pack(side=Tk.BOTTOM, fill=Tk.BOTH, expand=1)
-entry.pack(side=Tk.TOP, fill=Tk.X)
-scrollbar.pack(fill=Tk.Y, expand=1)
+rootTOP.pack(fill=Tk.BOTH, expand = 1)
+rootBOT.pack(fill=Tk.X)
 
-scrollbar.config(command=listbox.yview)
-root.geometry('1280x720+0+0')
+windowLEFT.pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
+windowRIGHT.pack(side=Tk.RIGHT, fill=Tk.Y)
+
+entry.pack(fill=Tk.X)
+listbox.pack(fill=Tk.BOTH, expand = 1)
+scrollbary.pack(fill=Tk.Y, expand = 1)
+scrollbarx.pack(fill=Tk.X)
+
+scrollbary.config(command=listbox.yview)
+scrollbarx.config(command=listbox.xview)
+root.geometry('1280x480+0+0')
+window.geometry('300x600+1280+0')
+
 Tk.mainloop()

@@ -224,6 +224,14 @@ void read_from_client(){
                 SDL_PauseAudioDevice(dev, 0);
                 run_flag = 1;
             }
+            
+            if (strncmp(buffer_str, "gettime", 7) == 0){
+                char buf[20];
+                double seconds = (double) *master_video_secs / 1000000;
+                sprintf(buf, "%f",  seconds);
+                int buflen = strlen(buf);
+                sendto(s, buf, buflen, 0, (struct sockaddr *) &si_other, &slen);
+            }
         }
         amt = 0;
         SDL_Delay(50);
