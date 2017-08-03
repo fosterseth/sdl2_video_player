@@ -109,10 +109,20 @@ def load_matfile(filename):
 
 def draw_rects(data, ax, bottom):
     values = data[:, 2].astype(int)
+    prev_off = -1
+    all_rects = []
     for i in range(0, np.size(data[:, 0])):
         dur = data[i, 1] - data[i, 0]
         if dur > 0:
-            ax.add_patch(pat.Rectangle((data[i, 0], bottom), dur, 10, color=colors[values[i] - 1]))
+            # if rect overlaps, then draw at half height so that both show up
+            if data[i,1] < prev_off:
+                height = 5
+            else:
+                height = 10
+            prev_off = data[i,1]
+            patch = ax.add_patch(pat.Rectangle((data[i, 0], bottom), dur, height, color=colors[values[i] - 1]))
+            all_rects.append(patch)
+    return all_rects
 
 def onclick(event, axID):
     if event.inaxes == axID:
@@ -141,12 +151,29 @@ def destroy():
     root.quit()
     root.destroy()
 
+class destroyBox():
+    def __init__(self, box, rects, text):
+        self.box = box
+        self.rects = rects
+        self.text = text
+        self.cidpress = self.box.figure.canvas.mpl_connect(
+            'button_press_event', self.on_press)
+    def on_press(self, event):
+        if event.inaxes != self.box.axes: return
+        contains, attrd = self.box.contains(event)
+        if not contains: return
+        for r in self.rects:
+            r.remove()
+        self.text.remove()
+        self.box.remove()
 
+
+# allstreams = []
 def add_variable(filename, ax, axc, axname):
     print(filename)
     bot, top = ax.get_ylim()
-    data = load_matfile("derived/" + filename)
-    draw_rects(data, ax, top)
+    data = load_matfile("c:/users/sbf/Desktop/derived/" + filename)
+    rects = draw_rects(data, ax, top)
     if bot < 0:
         ax.set_ylim(bottom=0, top=10.5)
         axname.set_ylim(bottom=0, top=10.5)
@@ -157,8 +184,10 @@ def add_variable(filename, ax, axc, axname):
         top = top + 10.5
     ax.set_xlim(left=data[0, 0], right=data[-1, 1])
     axc.set_xlim(left=data[0, 0], right=data[-1, 1])
-    axname.add_patch(pat.Rectangle((0,top-8), 1, 4, color="orange"))
-    axname.text(0,top-6.5, filename)
+    box = axname.add_patch(pat.Rectangle((0,top-8), 1, 4, color="orange"))
+    text = axname.text(0,top-6.5, filename)
+    # db = destroyBox(box, rects, text)
+    # allstreams.append(db)
     ax.figure.canvas.draw()
 
 root = Tk.Tk()
@@ -173,34 +202,45 @@ plt.close('all')
 
 # Just a figure and one subplot
 
-f = plt.figure(figsize=(8,3))
-gs = gridspec.GridSpec(2,2, width_ratios = [10,1], height_ratios = [5,1])
-gs.update(left=0.01, right=0.99, wspace=0.01)
-ax = plt.subplot(gs[0,0])
+def init():
+    f = plt.figure(figsize=(8,3))
+    gs = gridspec.GridSpec(2,2, width_ratios = [8,1], height_ratios = [5,1])
+    gs.update(left=0.01, right=0.99, wspace=0.01)
+    ax = plt.subplot(gs[0,0])
 
-axname = plt.subplot(gs[0,1])
-axname.set_ylim(bottom=0, top=10.5)
-axname.set_xlim(left=0, right=1)
-axname.axis('off')
-
-
-ax.set_title('Simple plot')
-ax.set_ylim(bottom=-1, top=0)
-ax.set_yticklabels([])
-ax.set_yticks([])
-
-axc = plt.subplot(gs[1,0])
-axc.set_ylim(bottom=0, top=10)
-axc.set_yticklabels([])
-axc.set_yticks([])
-
-add_variable("cevent_eye_roi_child.mat", ax, axc, axname)
+    axname = plt.subplot(gs[0,1])
+    axname.set_ylim(bottom=0, top=10.5)
+    axname.set_xlim(left=0, right=1)
+    axname.axis('off')
 
 
-ctrl_bar = axc.add_patch(pat.Rectangle((30, 0), 10, 10, color=colors[1]))
-dr = DraggableRectangle(ctrl_bar, ax, f)
+    ax.set_title('Simple plot')
+    ax.set_ylim(bottom=-1, top=0)
+    ax.set_yticklabels([])
+    ax.set_yticks([])
 
-ctrl_marker = axc.add_patch(pat.Rectangle((50, 0), 2, 2, color="red"))
+    axc = plt.subplot(gs[1,0])
+    axc.set_ylim(bottom=0, top=10)
+    axc.set_yticklabels([])
+    axc.set_yticks([])
+
+
+    ctrl_bar = axc.add_patch(pat.Rectangle((30, 0), 10, 10, color=colors[1]))
+    dr = DraggableRectangle(ctrl_bar, ax, f)
+
+    ctrl_marker = axc.add_patch(pat.Rectangle((50, 0), 2, 2, color="red"))
+
+    # a tk.DrawingArea
+    canvas = FigureCanvasTkAgg(f, master=rootTOP)
+    canvas.show()
+    # canvas.get_tk_widget().pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
+
+    canvas._tkcanvas.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
+    canvas.mpl_connect('button_press_event', lambda event: onclick(event, ax))
+    dr.connect()
+
+    add_variable("cevent_eye_roi_child.mat", ax, axc, axname)
+    return f,ax,axc,axname,dr, ctrl_bar, canvas, gs
 
 def update_marker(event):
     command = "gettime"
@@ -210,25 +250,21 @@ def update_marker(event):
     x = ctrl_marker.get_x()
     ctrl_marker.set_x(x+0.1)
 
-# a tk.DrawingArea
-canvas = FigureCanvasTkAgg(f, master=rootTOP)
-canvas.show()
-# canvas.get_tk_widget().pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
-
-canvas._tkcanvas.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
-canvas.mpl_connect('button_press_event', lambda event: onclick(event, ax))
-dr.connect()
-
 buttonQuit = Tk.Button(master=rootBOT, text='Quit', command = destroy)
 buttonQuit.pack(side=Tk.LEFT)
 
 buttonPlay = Tk.Button(master=rootBOT, text='Play', command = playvideo).pack(side=Tk.LEFT)
 buttonPause = Tk.Button(master=rootBOT, text='Pause', command = pausevideo).pack(side=Tk.LEFT)
 buttonOpenvideos = Tk.Button(master=rootBOT, text='OpenVideos', command = openvideos).pack(side=Tk.LEFT)
+buttonClearPlot = Tk.Button(master=rootBOT, text='ClearPlot', command = clearplot).pack(side=Tk.LEFT)
 
 # File Management
-files = os.listdir('derived')
+files = os.listdir('c:/users/sbf/Desktop/derived')
+setfiles = set(files)
+favorites = ['cevent_eye_roi_child.mat', 'cevent_eye_roi_parent.mat', 'cevent_inhand_child.mat', 'cevent_inhand_parent.mat', 'cevent_eye_joint-attend_both.mat', 'cevent_speech_naming_local-id.mat', 'cevent_speech_utterance']
+favorites = list(setfiles.intersection(favorites))
 
+print(favorites)
 def listbox_callback(event, ax, axc):
     if event.keysym == 'Return':
         idx = listbox.curselection()
@@ -240,6 +276,11 @@ scrollbary = Tk.Scale(master=windowRIGHT, orient=Tk.VERTICAL, from_=0, to=len(fi
 scrollbarx = Tk.Scale(master=windowLEFT, orient=Tk.HORIZONTAL, from_=0, to=50)
 listbox = Tk.Listbox(master=windowLEFT)
 listbox.bind('<Key>', lambda event: listbox_callback(event, ax, axc))
+
+listbox.insert(Tk.END, "== FAVORITES ==")
+for i in favorites:
+    listbox.insert(Tk.END, i)
+listbox.insert(Tk.END, "===============")
 
 def search_files(text):
     keywords = text.split(" ")
@@ -254,7 +295,7 @@ def search_files(text):
     return entries
 
 def update_listbox(text):
-    listbox.delete(0, Tk.END)
+    listbox.delete(len(favorites)+2, Tk.END)
     new_entries = search_files(text)
     for n in new_entries:
         listbox.insert(Tk.END, n)
@@ -269,8 +310,8 @@ entry = Tk.Entry(master=windowLEFT)
 entry.bind('<Key>', entry_callback)
 
 
-for f in files:
-    listbox.insert(Tk.END, f)
+for i in files:
+    listbox.insert(Tk.END, i)
 
 
 rootTOP.pack(fill=Tk.BOTH, expand = 1)

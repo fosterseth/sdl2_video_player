@@ -56,6 +56,7 @@ http://stackoverflow.com/questions/21007329/what-is-a-sdl-renderer/21007477#2100
 #include "packetQueue.h"
 //#include <sys/socket.h>  // linux
 #include <winsock2.h> // mingw64
+#include <libswscale/swscale.h>
 //#include <netinet/in.h> // linux
 
 typedef struct VideoState {
@@ -117,6 +118,7 @@ int y_pos;
 int looking_for_master_audio;
 Uint32 userEventType;
 int64_t *master_video_secs;
+int portnum;
 
 
 void read_from_client(){
@@ -143,7 +145,7 @@ void read_from_client(){
     //Prepare the sockaddr_in structure
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = INADDR_ANY;
-    server.sin_port = htons( 7377 );
+    server.sin_port = htons( portnum);
     
         //Bind
     if( bind(s ,(struct sockaddr *)&server , sizeof(server)) == SOCKET_ERROR)
@@ -294,6 +296,8 @@ void initiate_audio_device(VideoState *vs){
 int initiate_renderer_window(VideoState *vs, int x_pos1, int y_pos1){
     int width = vs->video_dec_ctx->width;
 	int height = vs->video_dec_ctx->height;
+    width = 320;
+    height = 240;
 
 	// create window
 	vs->Window = SDL_CreateWindow(
@@ -415,17 +419,40 @@ int displayFrame(VideoState *vs){
     //                printPTSnow(vs);
                     vs->first_after_seek = 0;
                 }
+                struct SwsContext *sws_ctx; 
+                sws_ctx = sws_getContext( vs->video_dec_ctx->width,  vs->video_dec_ctx->height, AV_PIX_FMT_YUV420P,
+                                                              320, 240, AV_PIX_FMT_YUV420P,
+                                                              SWS_BICUBIC, NULL, NULL, NULL);
+//                uint8_t *pixels[4];
+//                int pitch[4];
+//                if (!SDL_LockTexture(vs->Texture, NULL, (void **)pixels, pitch)) {
+//                    sws_scale(sws_ctx, (const uint8_t * const *)frame->data, frame->linesize,
+//                              0, frame->height, pixels, pitch);
+//                    SDL_UnlockTexture(vs->Texture);
+//                }
+                
+                AVFrame* frame2 = av_frame_alloc();
+                int num_bytes = avpicture_get_size(AV_PIX_FMT_YUV420P, 320, 240);
+                uint8_t* frame2_buffer = (uint8_t *)av_malloc(num_bytes*sizeof(uint8_t));
+                avpicture_fill((AVPicture*)frame2, frame2_buffer, AV_PIX_FMT_YUV420P, 320, 240);
+                
+                sws_scale(sws_ctx, frame->data, frame->linesize, 0, 480, frame2->data, frame2->linesize);
+                
                 SDL_UpdateYUVTexture(vs->Texture,
                                         NULL,
-                                        frame->data[0],
-                                        frame->linesize[0],
-                                        frame->data[1],
-                                        frame->linesize[1],
-                                        frame->data[2],
-                                        frame->linesize[2]);
+                                        frame2->data[0],
+                                        frame2->linesize[0],
+                                        frame2->data[1],
+                                        frame2->linesize[1],
+                                        frame2->data[2],
+                                        frame2->linesize[2]);
                 SDL_RenderCopy(vs->Renderer, vs->Texture, NULL, NULL);
                 SDL_RenderPresent(vs->Renderer);
+                
+                av_frame_free(&frame2);
+                sws_freeContext(sws_ctx);
             }
+            
         }
         //av_packet_unref(&pkt);
         //av_free(frame);
@@ -673,6 +700,74 @@ void handleEvent(const SDL_Event *event){
             break;
         }
     }
+    if (event->type == SDL_WINDOWEVENT) {
+        switch (event->window.event) {
+        case SDL_WINDOWEVENT_SHOWN:
+            SDL_Log("Window %d shown", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_HIDDEN:
+            SDL_Log("Window %d hidden", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_EXPOSED:
+            SDL_Log("Window %d exposed", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_MOVED:
+            SDL_Log("Window %d moved to %d,%d",
+                    event->window.windowID, event->window.data1,
+                    event->window.data2);
+            break;
+        case SDL_WINDOWEVENT_RESIZED:
+            SDL_Log("Window %d resized to %dx%d",
+                    event->window.windowID, event->window.data1,
+                    event->window.data2);
+            break;
+        case SDL_WINDOWEVENT_SIZE_CHANGED:
+            SDL_Log("Window %d size changed to %dx%d",
+                    event->window.windowID, event->window.data1,
+                    event->window.data2);
+            break;
+        case SDL_WINDOWEVENT_MINIMIZED:
+            SDL_Log("Window %d minimized", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_MAXIMIZED:
+            SDL_Log("Window %d maximized", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_RESTORED:
+            SDL_Log("Window %d restored", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_ENTER:
+            SDL_Log("Mouse entered window %d",
+                    event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_LEAVE:
+            SDL_Log("Mouse left window %d", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_FOCUS_GAINED:
+            SDL_Log("Window %d gained keyboard focus",
+                    event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_FOCUS_LOST:
+            SDL_Log("Window %d lost keyboard focus",
+                    event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_CLOSE:
+            SDL_Log("Window %d closed", event->window.windowID);
+            quit_signal = 1;
+            break;
+#if SDL_VERSION_ATLEAST(2, 0, 5)
+        case SDL_WINDOWEVENT_TAKE_FOCUS:
+            SDL_Log("Window %d is offered a focus", event->window.windowID);
+            break;
+        case SDL_WINDOWEVENT_HIT_TEST:
+            SDL_Log("Window %d has a special hit test", event->window.windowID);
+            break;
+#endif
+        default:
+            SDL_Log("Window %d got unknown event %d",
+                    event->window.windowID, event->window.event);
+            break;
+        }
+    }
 }
 
 void push_open_file(char filename[1024]){
@@ -714,14 +809,18 @@ int main(int argc, char *argv[]){
     looking_for_master_audio = 1;
     bytes_per_sample = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
     
+    portnum = atoi(argv[1]);
+    
     SDL_CreateThread(read_from_client, "read_from_client", NULL);
 	
     userEventType = SDL_RegisterEvents(1);
+    
+
     int v;
-    for (v=0; v<argc-1; v++){
+    for (v=2; v<argc; v++){
         char *filename;
         filename = av_mallocz(1024);
-        strcpy(filename, argv[v+1]);
+        strcpy(filename, argv[v]);
         push_open_file(filename);
     }
     
