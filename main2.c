@@ -93,7 +93,7 @@ typedef struct VideoState {
     int video_frame_count;
     int frame_total;
     int master_audio;
-    int first_after_seek;
+    int show_one;
     SDL_Renderer *Renderer;
     SDL_Window *Window;
     SDL_Texture *Texture;
@@ -123,6 +123,7 @@ int looking_for_master_audio;
 Uint32 userEventType;
 int64_t *master_video_secs;
 int portnum;
+
 
 
 void read_from_client(){
@@ -403,7 +404,7 @@ int decode_thread(VideoState *vs){
 
 int displayFrame(VideoState *vs){
     /* decode video frame */
-    if (run_flag){
+    if (run_flag | vs->show_one){
         AVPacket pkt;
         int gotframe;
         AVFrame *frame;
@@ -411,7 +412,6 @@ int displayFrame(VideoState *vs){
         if (packet_queue_get(&vs->videoqueue, &pkt, 0)){
             if(pkt.data == flush_pkt.data) {
                 avcodec_flush_buffers(vs->video_stream->codec);
-                vs->first_after_seek = 1;
                 return 0;
             }
             avcodec_decode_video2(vs->video_dec_ctx, frame, &gotframe, &pkt);
@@ -419,25 +419,12 @@ int displayFrame(VideoState *vs){
                 frame->pts = av_frame_get_best_effort_timestamp(frame);
                 vs->current_video_pts = frame->pts;
                 vs->current_video_secs = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
-    //            fprintf(fp, "video pts %d  secs %d\n", vs->current_video_pts, vs->current_video_secs);
-    //            vs->current_video_pts = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
-                if (vs->first_after_seek){
-    //                printPTSnow(vs);
-                    vs->first_after_seek = 0;
-                }
                 
                 if (vs->sws_ctx == NULL){
                     vs->sws_ctx = sws_getContext( vs->video_dec_ctx->width,  vs->video_dec_ctx->height, AV_PIX_FMT_YUV420P,
                                                                   vs->window_width, vs->window_height, AV_PIX_FMT_YUV420P,
                                                                   SWS_BICUBIC, NULL, NULL, NULL);
                 }
-//                uint8_t *pixels[4];
-//                int pitch[4];
-//                if (!SDL_LockTexture(vs->Texture, NULL, (void **)pixels, pitch)) {
-//                    sws_scale(sws_ctx, (const uint8_t * const *)frame->data, frame->linesize,
-//                              0, frame->height, pixels, pitch);
-//                    SDL_UnlockTexture(vs->Texture);
-//                }
                 
                 AVFrame* frame2 = av_frame_alloc();
                 int num_bytes = avpicture_get_size(AV_PIX_FMT_YUV420P, vs->window_width, vs->window_height);
@@ -462,6 +449,7 @@ int displayFrame(VideoState *vs){
                 
                 av_free(frame2_buffer);
                 av_frame_free(&frame2);
+                vs->show_one = 0;
 //                sws_freeContext(sws_ctx);
             }
             
@@ -559,26 +547,28 @@ void printPTSnow(VideoState *vs){
 
 void displayFrame_thread(VideoState *vs){
 	int next_delay;
-    while(quit_signal == 0){
-        SDL_Delay(next_delay);
-        next_delay = vs->frame_time;
-        if (vs->videoqueue.nb_packets > 0){
-            Uint32 queued_size = SDL_GetQueuedAudioSize(dev);
-            int64_t queued_ns = 0;
-            queued_ns = (int64_t) ((double) queued_size / 2.0 / (double) bytes_per_sample / (double) audio_sample_rate * 1000000);
-            vs->queued_ms = (int64_t) queued_ns / 1000;
-            vs->queued_size = queued_size;
-            int64_t curr_audio_secs = last_audio_secs - queued_ns;
-            vs->delay = (curr_audio_secs - vs->current_video_secs) / 1000;
-            if (vs->delay <  -50) {
-                next_delay += 5;
+    while (quit_signal == 0){
+        if (run_flag | vs->show_one){
+            SDL_Delay(next_delay);
+            next_delay = vs->frame_time;
+            if (vs->videoqueue.nb_packets > 0){
+                Uint32 queued_size = SDL_GetQueuedAudioSize(dev);
+                int64_t queued_ns = 0;
+                queued_ns = (int64_t) ((double) queued_size / 2.0 / (double) bytes_per_sample / (double) audio_sample_rate * 1000000);
+                vs->queued_ms = (int64_t) queued_ns / 1000;
+                vs->queued_size = queued_size;
+                int64_t curr_audio_secs = last_audio_secs - queued_ns;
+                vs->delay = (curr_audio_secs - vs->current_video_secs) / 1000;
+                if (vs->delay <  -50) {
+                    next_delay += 5;
+                }
+                else if (vs->delay > 50) 
+                    next_delay -= 5;
+                sprintf(vs->printlog, "curr_audio %d video %d queued %d delay %d next_delay %d",curr_audio_secs, vs->current_video_secs, vs->queued_ms, vs->delay, next_delay);
+    //            fprintf(fp, "last_audio_secs %d current_video_secs %d queued_ns %d queued_size %d\n", last_audio_secs, vs->current_video_secs, queued_ns, queued_size);
+    //            SDL_PauseAudioDevice(dev, 0);
+                displayFrame(vs);
             }
-            else if (vs->delay > 50) 
-                next_delay -= 5;
-            sprintf(vs->printlog, "curr_audio %d video %d queued %d delay %d next_delay %d",curr_audio_secs, vs->current_video_secs, vs->queued_ms, vs->delay, next_delay);
-//            fprintf(fp, "last_audio_secs %d current_video_secs %d queued_ns %d queued_size %d\n", last_audio_secs, vs->current_video_secs, queued_ns, queued_size);
-//            SDL_PauseAudioDevice(dev, 0);
-            displayFrame(vs);
         }
 	}
 }
@@ -656,7 +646,7 @@ int open_file(char *filename){
     av_init_packet(&vs->pkt);
     vs->pkt.data = NULL;
     vs->pkt.size = 0;
-    vs->first_after_seek = 0;
+    vs->show_one = 1;
     vs->frame_time = (Uint32) vs->video_stream->avg_frame_rate.den * 1000 / vs->video_stream->avg_frame_rate.num;
     vs->set_swrContext = 1;
     vs->sws_ctx = NULL;
@@ -794,7 +784,7 @@ void push_open_file(char filename[1024]){
 }
 
 void set_seek_change(double seek_change_secs){
-    set_seek(*master_video_secs + (int64_t)(seek_change_secs * 1000000));
+        set_seek(*master_video_secs + (int64_t)(seek_change_secs * 1000000));
 }
 
 void set_seek_secs(double seek_to_secs){
@@ -807,6 +797,7 @@ void set_seek(int64_t seek_to_secs){
     for (v = 0; v < num_files; v++){
         vs_array[v]->seek_flag = 1;
         vs_array[v]->seek_to_secs = seek_to_secs;
+        vs_array[v]->show_one = 1;
     }
 }
 
@@ -868,7 +859,7 @@ int main(int argc, char *argv[]){
     
 	SDL_Event event;
     quit_signal = 0;
-    run_flag = 1;
+    run_flag = 0;
     while (quit_signal == 0){
         if (SDL_PollEvent(&event)){
             handleEvent(&event);
