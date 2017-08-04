@@ -54,6 +54,7 @@ http://stackoverflow.com/questions/21007329/what-is-a-sdl-renderer/21007477#2100
 #include <SDL2/SDL_thread.h>
 #include <stdio.h>
 #include "packetQueue.h"
+#include <string.h>
 //#include <sys/socket.h>  // linux
 #include <winsock2.h> // mingw64
 #include <libswscale/swscale.h>
@@ -94,6 +95,8 @@ typedef struct VideoState {
     int frame_total;
     int master_audio;
     int show_one;
+    int xpos;
+    int ypos;
     SDL_Renderer *Renderer;
     SDL_Window *Window;
     SDL_Texture *Texture;
@@ -105,6 +108,13 @@ typedef struct VideoState {
     PacketQueue videoqueue;
     PacketQueue audioqueue;
 } VideoState;
+
+struct FileName {
+    char filename[1024];
+    int xpos;
+    int ypos;
+};
+
 SDL_AudioSpec want, have;
 SDL_AudioDeviceID dev;
 int quit_signal;
@@ -212,13 +222,26 @@ void read_from_client(){
                 break;
             }
             if (strncmp(buffer_str, "open", 4) == 0){
-                char *filename;
+                char command[1024];
+                strcpy(command, &buffer_str[5]);
+//                memset(filename, '\0', 1024);
+                printf("opening %s\n", command);
+                char *pch1; 
+                char *pch2;
+                pch1 = strchr(command, ' ');
+                pch2 = strchr(pch1+1, ' ');
+                int ypos = atoi(pch2+1);
+                *pch2 = '\0'; 
+                int xpos = atoi(pch1);
+                *pch1 = '\0';
+                struct FileName *filename;
                 filename = av_mallocz(1024);
-                memset(filename, '\0', 1024);
-                strcpy(filename, &buffer_str[5]);
-                printf("opening %s\n", filename);
+                strcpy(filename->filename, command);
+                filename->xpos = xpos;
+                filename->ypos = ypos;
                 push_open_file(filename);
             }
+            
             if (strncmp(buffer_str, "seekto", 6) == 0){
                 seek_amount = atof(&buffer_str[7]);
                 set_seek_secs(seek_amount);
@@ -298,7 +321,7 @@ void initiate_audio_device(VideoState *vs){
 	SDL_PauseAudioDevice(dev, 0);
 }
 
-int initiate_renderer_window(VideoState *vs, int x_pos1, int y_pos1){
+int initiate_renderer_window(VideoState *vs, int xpos1, int ypos1){
     int width = vs->video_dec_ctx->width;
 	int height = vs->video_dec_ctx->height;
     vs->window_width = width;
@@ -307,8 +330,8 @@ int initiate_renderer_window(VideoState *vs, int x_pos1, int y_pos1){
 	// create window
 	vs->Window = SDL_CreateWindow(
 			"MOVIE",
-			x_pos1,
-			y_pos1,
+			xpos1,
+			ypos1,
 			width,
 			height,
 			SDL_WINDOW_RESIZABLE);
@@ -583,14 +606,14 @@ void queueAudio_thread(VideoState *vs){
     }
 }
 
-int open_file(char *filename){
+int open_file(char filename[1024], int xpos1, int ypos1){
 
 //    char window_name[80];
     
     VideoState *vs;
     vs = av_mallocz (sizeof(VideoState));
-    av_strlcpy(vs->src_filename, filename, sizeof(vs->src_filename));
-    av_freep(&filename);
+    av_strlcpy(vs->src_filename, filename, 1024);
+//    av_freep(&filename);
     vs->frame_total = 0;
 
     if (avformat_open_input(&vs->fmt_ctx, vs->src_filename, NULL, NULL) != 0){
@@ -623,12 +646,10 @@ int open_file(char *filename){
     }
     // open renderer window
 //    sprintf(window_name, "MOVIE%d", num_files);
-    if (initiate_renderer_window(vs, x_pos, y_pos) < 0){
+    if (initiate_renderer_window(vs, xpos1, ypos1) < 0){
         fprintf(stderr, "Could not initiate window\n");
         return -1;
     }
-    x_pos += 50;
-    y_pos += 50;
     // initiate packetqueue
     packet_queue_init(&vs->videoqueue);
     
@@ -666,7 +687,9 @@ int open_file(char *filename){
 void handleEvent(const SDL_Event *event){
     double seek_amount;
     if (event->type == userEventType){
-        open_file(event->user.data1);
+        struct FileName *stru_filename = (struct FileName *) event->user.data1;
+        open_file(stru_filename->filename, stru_filename->xpos, stru_filename->ypos);
+        av_freep(&stru_filename);
     }
 	if (event->type == SDL_KEYDOWN){
       switch (event->key.keysym.sym) {
@@ -774,7 +797,7 @@ void handleEvent(const SDL_Event *event){
     }
 }
 
-void push_open_file(char filename[1024]){
+void push_open_file(struct FileName *filename){
     SDL_Event event;
     SDL_zero(event);
     event.type = userEventType;
@@ -851,10 +874,11 @@ int main(int argc, char *argv[]){
 
     int v;
     for (v=2; v<argc; v++){
-        char *filename;
-        filename = av_mallocz(1024);
+        char filename[1024];
         strcpy(filename, argv[v]);
-        push_open_file(filename);
+        open_file(filename, x_pos, y_pos);
+        x_pos += 50;
+        y_pos += 50;
     }
     
 	SDL_Event event;
