@@ -1,4 +1,4 @@
-/*
+/* c:/users/sbf/Desktop/7001/cam01_frames_p/cam01.mov  c:/users/sbf/Desktop/7001/cam02_frames_p/cam02.mov
 8-bit support
 AUDIO_S8 signed 8-bit samples
 AUDIO_U8 unsigned 8-bit samples
@@ -97,17 +97,17 @@ typedef struct VideoState {
     int show_one;
     int xpos;
     int ypos;
+    int quit_signal;
+    SDL_Thread *thread_displayframe;
+    SDL_Thread *thread_decode;
+    SDL_Thread *thread_queueaudio;
     SDL_Renderer *Renderer;
     SDL_Window *Window;
     SDL_Texture *Texture;
-    SDL_Thread *thread;
-	SDL_Thread *thread_printPTS;
-    SDL_TimerID timer_dF;
-    SDL_TimerID timer_qA;
-    SDL_TimerID timer_printPTS;
     PacketQueue videoqueue;
     PacketQueue audioqueue;
 } VideoState;
+
 
 struct FileName {
     char filename[1024];
@@ -117,7 +117,7 @@ struct FileName {
 
 SDL_AudioSpec want, have;
 SDL_AudioDeviceID dev;
-int quit_signal;
+int all_quit_signal;
 int64_t last_audio_pts;
 int64_t last_audio_secs;
 int bytes_per_sample;
@@ -134,11 +134,9 @@ Uint32 userEventType;
 int64_t *master_video_secs;
 int portnum;
 
-
-
 void read_from_client(){
     int slen;
-    SOCKET s;
+    SOCKET s, new_socket;
     struct sockaddr_in server, si_other;
     WSADATA wsa;
     slen = sizeof(si_other) ;
@@ -151,7 +149,7 @@ void read_from_client(){
     }
     printf("Initialised.\n");
         //Create a socket
-    if((s = socket(AF_INET , SOCK_DGRAM , 0 )) == INVALID_SOCKET)
+    if((s = socket(AF_INET , SOCK_STREAM , 0 )) == INVALID_SOCKET)
     {
         printf("Could not create socket : %d" , WSAGetLastError());
     }
@@ -170,39 +168,30 @@ void read_from_client(){
     }
     puts("Bind done");
     
-//    int welcomeSocket, newSocket;
-//    char buffer[1024];
-//    struct sockaddr_in serverAddr;
-//    struct sockaddr_storage serverStorage;
-//    socklen_t addr_size;
-//
-//    /*---- Create the socket. The three arguments are: ----*/
-//    /* 1) Internet domain 2) Stream socket 3) Default protocol (TCP in this case) */
-//    welcomeSocket = socket(PF_INET, SOCK_DGRAM, 0);
-//
-//    /*---- Configure settings of the server address struct ----*/
-//    /* Address family = Internet */
-//    serverAddr.sin_family = AF_INET;
-//    /* Set port number, using htons function to use proper byte order */
-//    serverAddr.sin_port = htons(7893);
-//    /* Set IP address to localhost */
-//    serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
-//    /* Set all bits of the padding field to 0 */
-//    memset(serverAddr.sin_zero, '\0', sizeof serverAddr.sin_zero);  
-//
-//    /*---- Bind the address struct to the socket ----*/
-//    bind(welcomeSocket, (struct sockaddr *) &serverAddr, sizeof(serverAddr));
+        //Listen to incoming connections
+    listen(s , 1);
+     
+    //Accept and incoming connection
+    puts("Waiting for incoming connections...");
+     
+    new_socket = accept(s , (struct sockaddr *)&si_other, &slen);
+    if (new_socket == INVALID_SOCKET)
+    {
+        printf("accept failed with error code : %d" , WSAGetLastError());
+    }
+     
+    puts("Connection accepted");
+    
     double seek_amount;
     int amt;
+    char buffer_str[1024];
+    char buffer[1024];
     while(1){
-        printf("listening\n");
-        char buffer_str[1024];
-        char buffer[1024];
         memset(buffer_str, '\0', 1024);
         memset(buffer, '\0', 1024);
 //        int amt = read(welcomeSocket, buffer, 1024);
                 //try to receive some data, this is a blocking call
-        if ((amt = recvfrom(s, buffer, 1024, 0, (struct sockaddr *) &si_other, &slen)) == SOCKET_ERROR)
+        if ((amt = recv(new_socket, buffer, 1024, 0))== SOCKET_ERROR)
         {
             printf("recvfrom() failed with error code : %d" , WSAGetLastError());
             exit(EXIT_FAILURE);
@@ -218,7 +207,7 @@ void read_from_client(){
                 set_seek_change(-10.0);
             }
             if (strcmp(buffer_str, "break") == 0){
-                quit_signal = 1;
+                all_quit_signal = 1;
                 break;
             }
             if (strncmp(buffer_str, "open", 4) == 0){
@@ -257,10 +246,15 @@ void read_from_client(){
             
             if (strncmp(buffer_str, "gettime", 7) == 0){
                 char buf[20];
-                double seconds = (double) *master_video_secs / 1000000;
+                double seconds;
+                 if (num_files > 0){
+                    seconds = (double) *master_video_secs / 1000000;
+                 }else{
+                    seconds = 0;
+                 }
                 sprintf(buf, "%f",  seconds);
                 int buflen = strlen(buf);
-                sendto(s, buf, buflen, 0, (struct sockaddr *) &si_other, &slen);
+                send(new_socket, buf, buflen, 0);
             }
         }
         amt = 0;
@@ -390,8 +384,7 @@ int decode_packet(VideoState *vs){
 }
 
 int decode_thread(VideoState *vs){
-//    VideoState *vs = (VideoState *)arg;
-    while (quit_signal == 0){
+    while (vs->quit_signal == 0){
         SDL_Delay(5);
         if (vs->seek_flag){
             int64_t seek_pos = av_rescale_q(vs->seek_to_secs, AV_TIME_BASE_Q, vs->video_stream->time_base);
@@ -410,16 +403,20 @@ int decode_thread(VideoState *vs){
         }
         
         int ret = 0;
-        if (av_read_frame(vs->fmt_ctx, &vs->pkt) >= 0) {
-            AVPacket orig_pkt = vs->pkt;
-            do {
-                ret = decode_packet(vs);
-                if (ret < 0)
-                    break;
-                vs->pkt.data += ret;
-                vs->pkt.size -= ret;
-            } while (vs->pkt.size > 0);
-    //        av_packet_unref(&orig_pkt);
+        if (vs->videoqueue.nb_packets < 300){
+            
+             if (av_read_frame(vs->fmt_ctx, &vs->pkt) >= 0) {
+//                printf("%d\n", vs->videoqueue.nb_packets);
+                    AVPacket orig_pkt = vs->pkt;
+                    do {
+                        ret = decode_packet(vs);
+                        if (ret < 0)
+                            break;
+                        vs->pkt.data += ret;
+                        vs->pkt.size -= ret;
+                    } while (vs->pkt.size > 0);
+//                av_packet_unref(&orig_pkt);
+            }
         }
     }
 	return 0;
@@ -431,12 +428,12 @@ int displayFrame(VideoState *vs){
         AVPacket pkt;
         int gotframe;
         AVFrame *frame;
-        frame = av_frame_alloc();
         if (packet_queue_get(&vs->videoqueue, &pkt, 0)){
             if(pkt.data == flush_pkt.data) {
                 avcodec_flush_buffers(vs->video_stream->codec);
                 return 0;
             }
+            frame = av_frame_alloc();
             avcodec_decode_video2(vs->video_dec_ctx, frame, &gotframe, &pkt);
             if (gotframe) {
                 frame->pts = av_frame_get_best_effort_timestamp(frame);
@@ -470,11 +467,13 @@ int displayFrame(VideoState *vs){
                 SDL_RenderCopy(vs->Renderer, vs->Texture, NULL, NULL);
                 SDL_RenderPresent(vs->Renderer);
                 
-                av_free(frame2_buffer);
-                av_frame_free(&frame2);
+                av_freep(&frame2_buffer);
+                av_freep(&frame2);
+                av_free_packet(&pkt);
                 vs->show_one = 0;
 //                sws_freeContext(sws_ctx);
             }
+            av_freep(&frame);
             
         }
         //av_packet_unref(&pkt);
@@ -489,7 +488,7 @@ int queueAudio(VideoState *vs){
         int gotframe;
         AVFrame *frame;
         int ret, decoded;
-        frame = av_frame_alloc();
+        
         if (packet_queue_get(&vs->audioqueue, &pkt, 0)){
             if(pkt.data == flush_pkt.data) {
                 avcodec_flush_buffers(vs->audio_stream->codec);
@@ -497,7 +496,7 @@ int queueAudio(VideoState *vs){
                 vs->set_swrContext = 1;
                 return 0;
             }
-            
+            frame = av_frame_alloc();
             ret = avcodec_decode_audio4(vs->audio_dec_ctx, frame, &gotframe, &pkt);
             decoded = FFMIN(ret, pkt.size);
             if (gotframe){
@@ -536,6 +535,8 @@ int queueAudio(VideoState *vs){
     //            printf("just_queued    %d     bytes    %d\n", SDL_GetQueuedAudioSize(vs->dev), unpadded_linesize * 2);
                 av_freep(&output);
             }
+            av_frame_free(&frame);
+            av_free_packet(&pkt);
         }
     }
    // av_packet_unref(&pkt);
@@ -545,7 +546,7 @@ int queueAudio(VideoState *vs){
 
 
 void printPTS(VideoState *vs){
-    while (quit_signal == 0){
+    while (vs->quit_signal == 0){
         if (vs->videoqueue.nb_packets > 0){
             printf("%s\n", vs->src_filename);
             printf("last_audio %d   current_video %d   delay %d\n", last_audio_secs, vs->current_video_secs, vs->delay);
@@ -558,7 +559,7 @@ void printPTS(VideoState *vs){
 }
 
 void printPTS_thread(VideoState *vs){
-    while (quit_signal == 0){
+    while (vs->quit_signal == 0){
         printf("%s\n", vs->printlog);
         SDL_Delay(2000);
     }
@@ -570,9 +571,9 @@ void printPTSnow(VideoState *vs){
 
 void displayFrame_thread(VideoState *vs){
 	int next_delay;
-    while (quit_signal == 0){
+    while (vs->quit_signal == 0){
+        SDL_Delay(next_delay);
         if (run_flag | vs->show_one){
-            SDL_Delay(next_delay);
             next_delay = vs->frame_time;
             if (vs->videoqueue.nb_packets > 0){
                 Uint32 queued_size = SDL_GetQueuedAudioSize(dev);
@@ -587,7 +588,7 @@ void displayFrame_thread(VideoState *vs){
                 }
                 else if (vs->delay > 50) 
                     next_delay -= 5;
-                sprintf(vs->printlog, "curr_audio %d video %d queued %d delay %d next_delay %d",curr_audio_secs, vs->current_video_secs, vs->queued_ms, vs->delay, next_delay);
+//                sprintf(vs->printlog, "curr_audio %d video %d queued %d delay %d next_delay %d",curr_audio_secs, vs->current_video_secs, vs->queued_ms, vs->delay, next_delay);
     //            fprintf(fp, "last_audio_secs %d current_video_secs %d queued_ns %d queued_size %d\n", last_audio_secs, vs->current_video_secs, queued_ns, queued_size);
     //            SDL_PauseAudioDevice(dev, 0);
                 displayFrame(vs);
@@ -597,11 +598,11 @@ void displayFrame_thread(VideoState *vs){
 }
 
 void queueAudio_thread(VideoState *vs){
-	while (quit_signal == 0){
+	while (vs->quit_signal == 0){
+        SDL_Delay(5);
         if (vs->audioqueue.nb_packets > 0 & vs->seek_flag == 0){
             if ( vs->queued_ms < 1000 ) // milliseconds of queuedAudio
                 queueAudio(vs);
-            SDL_Delay(5);
         }
     }
 }
@@ -612,6 +613,7 @@ int open_file(char filename[1024], int xpos1, int ypos1){
     
     VideoState *vs;
     vs = av_mallocz (sizeof(VideoState));
+
     av_strlcpy(vs->src_filename, filename, 1024);
 //    av_freep(&filename);
     vs->frame_total = 0;
@@ -671,15 +673,19 @@ int open_file(char filename[1024], int xpos1, int ypos1){
     vs->frame_time = (Uint32) vs->video_stream->avg_frame_rate.den * 1000 / vs->video_stream->avg_frame_rate.num;
     vs->set_swrContext = 1;
     vs->sws_ctx = NULL;
-    SDL_CreateThread(decode_thread, "decodethread", vs);
-    SDL_CreateThread(displayFrame_thread, "displayframethread", vs);
-//        SDL_CreateThread(printPTS, "printPTS", vs);
-    if (vs->master_audio){
-//            SDL_CreateThread(printPTS, "printPTS", vs);
-        SDL_CreateThread(queueAudio_thread, "queueaudiothread", vs);
-    }
+    vs->quit_signal = 0;
+    vs->thread_decode = SDL_CreateThread(decode_thread, "decodethread", vs);
+//    decode_thread(vs);
+    vs->thread_displayframe = SDL_CreateThread(displayFrame_thread, "displayframethread", vs);
+    vs->thread_queueaudio = SDL_CreateThread(queueAudio_thread, "queueaudiothread", vs);
+    
     av_strlcpy(vs->printlog, "printlog", sizeof(vs->printlog));
-    vs_array[num_files] = vs;
+    
+    int v = 0;
+    while (vs_array[v] != NULL){
+        v++;
+    }
+    vs_array[v] = vs;
     num_files += 1;
     return 0;
 }
@@ -695,22 +701,23 @@ void handleEvent(const SDL_Event *event){
       switch (event->key.keysym.sym) {
         case SDLK_LEFT:
             printf("left\n");
-            seek_amount = -10.0;
-            set_seek_change(seek_amount);
+            if (!run_flag){
+                seek_amount = -0.25;
+                set_seek_change(seek_amount);
+            }
             break;
         case SDLK_RIGHT:
             printf("right\n");
-            seek_amount = 10.0;
-            set_seek_change(seek_amount);
+            show_one_frame();
             break;
         case SDLK_UP:
             printf("up\n");
-            seek_amount = -60.0;
+            seek_amount = -10.0;
             set_seek_change(seek_amount);
             break;
         case SDLK_DOWN:
             printf("down\n");
-            seek_amount = 60.0;
+            seek_amount = 10.0;
             set_seek_change(seek_amount);
             break;
         case SDLK_SPACE:
@@ -779,7 +786,7 @@ void handleEvent(const SDL_Event *event){
             break;
         case SDL_WINDOWEVENT_CLOSE:
 //            SDL_Log("Window %d closed", event->window.windowID);
-            quit_signal = 1;
+            close_window(event->window.windowID);
             break;
 #if SDL_VERSION_ATLEAST(2, 0, 5)
         case SDL_WINDOWEVENT_TAKE_FOCUS:
@@ -793,6 +800,36 @@ void handleEvent(const SDL_Event *event){
 //            SDL_Log("Window %d got unknown event %d",
 //                    event->window.windowID, event->window.event);
             break;
+        }
+    }
+}
+
+void close_window(int windowID){
+    int v;
+    for (v=0; v < 20; v++){
+        if (vs_array[v] != NULL){
+            if (vs_array[v]->windowID == windowID){
+                vs_array[v]->quit_signal = 1;
+                int a,b,c;
+                SDL_WaitThread(vs_array[v]->thread_decode, &a);
+                SDL_WaitThread(vs_array[v]->thread_displayframe, &b);
+                if (vs_array[v]->master_audio)
+                    SDL_WaitThread(vs_array[v]->thread_queueaudio, &c);
+                    
+                SDL_DestroyTexture(vs_array[v]->Texture);
+                SDL_DestroyRenderer(vs_array[v]->Renderer);
+                SDL_DestroyWindow(vs_array[v]->Window);
+                
+                if (vs_array[v]->master_audio){
+                    packet_queue_flush(&vs_array[v]->audioqueue);
+                    swr_free(&vs_array[v]->swr);
+                }
+                packet_queue_flush(&vs_array[v]->videoqueue);
+                sws_freeContext(vs_array[v]->sws_ctx);
+                av_freep(&vs_array[v]);
+                num_files -= 1;
+            }
+//            remove_vs(vs_list, vs_array[v]);
         }
     }
 }
@@ -817,37 +854,54 @@ void set_seek_secs(double seek_to_secs){
 
 void set_seek(int64_t seek_to_secs){
     int v;
-    for (v = 0; v < num_files; v++){
-        vs_array[v]->seek_flag = 1;
-        vs_array[v]->seek_to_secs = seek_to_secs;
-        vs_array[v]->show_one = 1;
+    for (v = 0; v < 20; v++){
+        if (vs_array[v] != NULL){
+            vs_array[v]->seek_flag = 1;
+            vs_array[v]->seek_to_secs = seek_to_secs;
+            vs_array[v]->show_one = 1;
+        }
+    }
+}
+
+void show_one_frame(){
+    if (run_flag == 0){
+        int v;
+        for (v = 0; v < 20; v++){
+            if (vs_array[v] != NULL){
+                vs_array[v]->show_one = 1;
+//                if (vs_array[v]->master_audio)
+//                    vs_array[v]->seek_flag = 1;
+            }
+        }
     }
 }
 
 void window_resize(SDL_Event *event){
     int v;
-    for (v=0; v < num_files; v++){
-        if (vs_array[v]->windowID == event->window.windowID){
-            sws_freeContext(vs_array[v]->sws_ctx);
-            vs_array[v]->sws_ctx = NULL;
-            vs_array[v]->window_width = event->window.data1;
-            vs_array[v]->window_height = event->window.data2;
-            SDL_DestroyRenderer(vs_array[v]->Renderer);
-            SDL_DestroyTexture(vs_array[v]->Texture);
-            vs_array[v]->Renderer = SDL_CreateRenderer(vs_array[v]->Window, -1, 0);
-            vs_array[v]->Texture = SDL_CreateTexture(
-                vs_array[v]->Renderer,
-                SDL_PIXELFORMAT_IYUV,
-                SDL_TEXTUREACCESS_STREAMING,
-                vs_array[v]->window_width,
-                vs_array[v]->window_height
-            );
-            
-            if (!vs_array[v]->Texture){
-                fprintf(stderr, "Failed to create texture\n");
-                return -1;
+    for (v = 0; v < 20; v++){
+        if (vs_array[v] != NULL){
+            if (vs_array[v]->windowID == event->window.windowID){
+                sws_freeContext(vs_array[v]->sws_ctx);
+                vs_array[v]->sws_ctx = NULL;
+                vs_array[v]->window_width = event->window.data1;
+                vs_array[v]->window_height = event->window.data2;
+                SDL_DestroyRenderer(vs_array[v]->Renderer);
+                SDL_DestroyTexture(vs_array[v]->Texture);
+                vs_array[v]->Renderer = SDL_CreateRenderer(vs_array[v]->Window, -1, 0);
+                vs_array[v]->Texture = SDL_CreateTexture(
+                    vs_array[v]->Renderer,
+                    SDL_PIXELFORMAT_IYUV,
+                    SDL_TEXTUREACCESS_STREAMING,
+                    vs_array[v]->window_width,
+                    vs_array[v]->window_height
+                );
+                
+                if (!vs_array[v]->Texture){
+                    fprintf(stderr, "Failed to create texture\n");
+                    return -1;
+                }
+                break;
             }
-            break;
         }
     }
 }
@@ -871,7 +925,6 @@ int main(int argc, char *argv[]){
 	
     userEventType = SDL_RegisterEvents(1);
     
-
     int v;
     for (v=2; v<argc; v++){
         char filename[1024];
@@ -882,9 +935,9 @@ int main(int argc, char *argv[]){
     }
     
 	SDL_Event event;
-    quit_signal = 0;
+    all_quit_signal = 0;
     run_flag = 0;
-    while (quit_signal == 0){
+    while (all_quit_signal == 0){
         if (SDL_PollEvent(&event)){
             handleEvent(&event);
         }

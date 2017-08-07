@@ -14,121 +14,120 @@ from matplotlib.figure import Figure
 
 import tkinter as Tk
 
-class DraggableRectangle:
-    def __init__(self, rect, ax, fig):
-        self.rect = rect
+class Drag:
+    def __init__(self, rectmain, rectedge, canvas1, mainplot):
+        self.canvas = canvas1
+        self.rectmain = rectmain
+        self.rectedge = rectedge
+        self.mainplot = mainplot
+
+        self.canvas.bind("<ButtonRelease-1>", self.released)
+        self.canvas.bind("<Button-1>", self.rect_pressed)
+        self.canvas.tag_bind(self.rectmain, "<B1-Motion>", self.rectmain_motion)
+        self.canvas.tag_bind(self.rectedge, "<B1-Motion>", self.rectedge_motion)
+        self.canvas.tag_bind(self.rectedge, "<Enter>", self.cursor_arrow)
+        self.canvas.tag_bind(self.rectedge, "<Leave>", self.cursor_normal)
         self.press = None
-        self.resize_amt = 5
-        self.ax  = ax
-        self.fig = fig
 
-    def connect(self):
-        'connect to all the events we need'
-        self.cidpress = self.rect.figure.canvas.mpl_connect(
-            'button_press_event', self.on_press)
-        self.cidrelease = self.rect.figure.canvas.mpl_connect(
-            'button_release_event', self.on_release)
-        self.cidmotion = self.rect.figure.canvas.mpl_connect(
-            'motion_notify_event', self.on_motion)
-        self.cidincrease = self.rect.figure.canvas.mpl_connect(
-            'key_press_event', self.keypress)
+    def released(self, event):
+        x0, y0, x1, y1 = self.canvas.coords(self.rectmain)
+        can_width = self.canvas.winfo_width()
+        x0_norm = x0/can_width
+        x1_norm = x1/can_width
+        self.mainplot.update_axes(x0_norm, x1_norm)
 
-    def on_press(self, event):
-        self.fig.canvas.get_tk_widget().focus_force()
-        'on button press we will see if the mouse is over us and store some data'
-        if event.inaxes != self.rect.axes: return
+    def rect_pressed(self, event):
+        x0, y0, x1, y1 = self.canvas.coords(self.rectmain)
+        x2, y0, x3, y1 = self.canvas.coords(self.rectedge)
+        can_width = self.canvas.winfo_width()
+        if event.x < x0:
+            resize = 1
+        elif event.x > x1:
+            resize = 2
+        else:
+            resize = 0
+        self.press = resize, x0, x1, x2, x3, y0, y1, event.x, can_width
 
-        contains, attrd = self.rect.contains(event)
-        if not contains: return
-        print('event contains', self.rect.xy)
-        x0, y0 = self.rect.xy
-        self.press = x0, y0, event.xdata, event.ydata
+    def cursor_normal(self, event):
+        self.canvas.config(cursor="arrow")
 
-    def keypress(self, event):
-        if event.key == "right":
-            self.increase_window(event)
-        elif event.key == "left":
-            self.decrease_window(event)
-        self.rect.figure.canvas.draw()
+    def cursor_arrow(self, event):
+        self.canvas.config(cursor="sb_h_double_arrow")
 
-    def increase_window(self, event):
-        w = self.rect.get_width()
-        self.rect.set_width(w+self.resize_amt)
-        self.resize_ax()
+    def rectmain_motion(self, event):
+        if self.press is None:
+            return
+        resize, x0, x1, x2, x3, y0, y1, xpress, can_width = self.press
+        dx = event.x - xpress
+        newx2 = dx + x2
+        newx3 = dx + x3
+        if (newx2 > 0) & (newx3 < can_width):
+            self.canvas.coords(self.rectmain, (x0+dx, y0, x1+dx, y1))
+            self.canvas.coords(self.rectedge, (newx2, y0, newx3, y1))
 
-    def resize_ax(self):
-        x0,y0 = self.rect.xy
-        x1 = self.rect.get_width()
-        self.ax.set_xlim(left=x0, right=x0+x1)
+    def rectedge_motion(self, event):
+        if self.press is None:
+            return
+        resize, x0, x1, x2, x3, y0, y1, xpress, can_width = self.press
+        dx = event.x - xpress
+        if resize == 1:
+            newx2 = dx + x2
+            if ((x1-newx2) > 5) & (newx2 > 0):
+                self.canvas.coords(self.rectmain, (x0+dx, y0, x1, y1))
+                self.canvas.coords(self.rectedge, (newx2, y0, x3, y1))
+        elif resize == 2:
+            newx3 = dx + x3
+            if ((newx3 - x0) > 5) & (newx3 < can_width):
+                self.canvas.coords(self.rectmain, (x0, y0, x1+dx, y1))
+                self.canvas.coords(self.rectedge, (x2, y0, newx3, y1))
 
-    def decrease_window(self, event):
-        w = self.rect.get_width()
-        self.rect.set_width(w-self.resize_amt)
-        self.resize_ax()
-
-    def on_motion(self, event):
-        'on motion we will move the rect if the mouse is over us'
-        if self.press is None: return
-        if event.inaxes != self.rect.axes: return
-        x0, y0, xpress, ypress = self.press
-
-        dx = event.xdata - xpress
-        dy = event.ydata - ypress
-        #print('x0=%f, xpress=%f, event.xdata=%f, dx=%f, x0+dx=%f' %
-        #      (x0, xpress, event.xdata, dx, x0+dx))
-        self.rect.set_x(x0+dx)
-        # self.rect.set_y(y0+dy)
-        # self.resize_ax()
-        # self.rect.figure.canvas.draw()
-
-    def on_release(self, event):
-        'on release we reset the press data'
-        self.press = None
-        self.resize_ax()
-        self.rect.figure.canvas.draw()
-
-    def disconnect(self):
-        'disconnect all the stored connection ids'
-        self.rect.figure.canvas.mpl_disconnect(self.cidpress)
-        self.rect.figure.canvas.mpl_disconnect(self.cidrelease)
-        self.rect.figure.canvas.mpl_disconnect(self.cidmotion)
 
 class MainPlot():
-    def __init__(self, parent, filenames):
-        self.fig = Figure(figsize=(15, 4))
-        gs = gridspec.GridSpec(2, 2, width_ratios=[6, 1], height_ratios=[5, 1])
-        gs.update(left=0.01, right=0.99, wspace=0.01)
-        self.ax = self.fig.add_subplot(gs[0, 0])
+    def __init__(self, parent, parent2, filenames, trials, destroy_fun, mainplot_axes_fun, sock):
+        self.mainplot_axes_fun = mainplot_axes_fun
+        self.sock = sock
+        self.fig = Figure(figsize=(12, 4))
+        self.destroy_fun = destroy_fun
+        gs = gridspec.GridSpec(1, 1)
+        gs.update(left=0.001, right=0.999, bottom=0.07, top=0.999)
+        self.ax = self.fig.add_subplot(gs[0,0])
 
-        self.axname = self.fig.add_subplot(gs[0, 1])
+        self.fig2 = Figure(figsize=(2,4))
+        self.axname = self.fig2.add_subplot(gs[0,0])
+        # self.axname = self.fig.add_subplot(gs[0, 1])
         self.axname.set_ylim(bottom=0, top=10.5)
         self.axname.set_xlim(left=0, right=1)
         self.axname.axis('off')
 
-        self.ax.set_title('Simple plot')
         self.ax.set_ylim(bottom=-1, top=0)
         self.ax.set_yticklabels([])
         self.ax.set_yticks([])
 
-        self.axc = self.fig.add_subplot(gs[1, 0])
-        self.axc.set_ylim(bottom=0, top=10)
-        self.axc.set_yticklabels([])
-        self.axc.set_yticks([])
-
-        self.ctrl_bar = self.axc.add_patch(pat.Rectangle((50, 0), 10, 10, color="green"))
-        self.dr = DraggableRectangle(self.ctrl_bar, self.ax, self.fig)
-
         # a tk.DrawingArea
         canvas = FigureCanvasTkAgg(self.fig, master=parent)
         canvas.show()
-        canvas.get_tk_widget().pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
+        canvas.get_tk_widget().pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
 
         canvas._tkcanvas.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
-        canvas.mpl_connect('button_press_event', lambda event: self.onclick(event, self.ax))
+        canvas.mpl_connect('button_press_event', self.onclick)
+
+        canvas2 = FigureCanvasTkAgg(self.fig2, master=parent2)
+        canvas2.show()
+        canvas2.get_tk_widget().pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
+        canvas2.mpl_connect('button_press_event', self.onclick)
 
         self.offset = 30.97 - 30
         self.colors = ["#4542f4", "#41f465", "#f44141", "#f441e5"]
+        self.label_colors = ["#E9CAF4", "#CAEDF4"]
+        self.numstreams = 0
 
+        data = self.load_matfile(trials)
+        # self.xmin = float('Inf')
+        # self.xmax = -float('Inf')
+        self.xmin = data[0,0]
+        self.xmax = data[-1,1]
+        # self.update_axes(0,1)
+        self.boxes_and_labels = []
         self.loaddata(filenames)
 
     def draw_rects(self, data, bottom):
@@ -155,26 +154,27 @@ class MainPlot():
         for f in filenames:
             self.add_variable(f)
 
-    def onclick(self, event, axID):
-        if event.inaxes == axID:
+    def onclick(self, event):
+        if event.inaxes == self.ax:
             print('button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
                   (event.button, event.x, event.y, event.xdata, event.ydata))
             command = "seekto " + str(event.xdata + self.offset)
-            sock.sendto(command.encode(), server_address)
-
-
-            # add_variable("cevent_eye_roi_child.mat", ax, axc, axname)
-        # def __del__(self):
-        #     canvas.get_tk_widget().destroy()
-        #     plt.close(fig)
+            self.sock.send(command.encode())
+        if event.inaxes == self.axname:
+            for b in self.boxes_and_labels:
+                box, label = b
+                contains, attrd = box.contains(event)
+                if contains:
+                    self.destroy_fun(label)
 
     def add_variable(self, filename):
         print(filename)
+        self.numstreams += 1
         ax = self.ax
         axname = self.axname
-        axc = self.axc
+        # axc = self.axc
         bot, top = ax.get_ylim()
-        data = self.load_matfile("c:/users/sbf/Desktop/derived/" + filename)
+        data = self.load_matfile(filename)
         rects = self.draw_rects(data, top)
         if bot < 0:
             ax.set_ylim(bottom=0, top=10.5)
@@ -184,12 +184,30 @@ class MainPlot():
             ax.set_ylim(top=top + 10.5)
             axname.set_ylim(top=top + 10.5)
             top = top + 10.5
-        ax.set_xlim(left=data[0, 0], right=data[-1, 1])
-        axc.set_xlim(left=data[0, 0], right=data[-1, 1])
-        box = axname.add_patch(pat.Rectangle((0, top - 8), 1, 4, color="orange"))
-        text = axname.text(0, top - 6.5, filename)
-        ax.figure.canvas.draw()
+        # ax.set_xlim(left=data[0, 0], right=data[-1, 1])
+        # axc.set_xlim(left=data[0, 0], right=data[-1, 1])
+        # if data[-1,1] > self.xmax:
+        #     self.xmax = data[-1,1]
+        # if data[0,0] < self.xmin:
+        #     self.xmin = data[0,0]
+        box = axname.add_patch(pat.Rectangle((0, top - 10.5), 1, 10, color=self.label_colors[self.numstreams % 2]))
+        filenamesplit = filename.split('/')
 
+        text = axname.text(0, top - 6.5, filenamesplit[-1])
+        self.boxes_and_labels.append((box,filename))
+        ax.figure.canvas.draw()
+        axname.figure.canvas.draw()
+
+    def update_axes(self, xlim1, xlim2):
+        width = self.xmax - self.xmin
+        newleft = xlim1 * width + self.xmin
+        newright = xlim2 * width + self.xmin
+        self.ax.set_xlim(left=newleft, right=newright)
+        self.mainplot_axes_fun(newleft, newright)
+        self.ax.figure.canvas.draw()
+
+    def get_axes(self):
+        return self.ax.get_xlim()
 
 
 class App(Tk.Tk):
@@ -202,8 +220,19 @@ class App(Tk.Tk):
                      'cevent_speech_naming_local-id.mat', 'cevent_speech_utterance',
                      'cevent_trials.mat']
         self.selected_files = []
+        self.formats = ["mov", "mp4", "wmv", "mpeg4", "h264"]
         self.container = None
         subprocess.Popen(["c:/users/sbf/Desktop/WORK/main2/Debug/main2.exe", "7999"])
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_address = ('localhost', 7999)
+        self.sock.connect(server_address)
+
+        self.bar_x0x3 = (0,70)
+        self.videopos = 500
+        self.mainplot_axes = (0,1)
+        self.canvas2width = 0
+        self.offset = 30.97 - 30
+        # self.loop() #check for memory leakage
 
     def initFrames(self):
         self.wm_title("Embedding in TK")
@@ -223,7 +252,6 @@ class App(Tk.Tk):
         self.buttonPause = Tk.Button(master=self.rootTOP, text='Pause', command=self.pausevideos)
         self.buttonClearPlot = Tk.Button(master=self.rootTOP, text='ClearPlot', command=self.clearplot)
         self.buttonOpenSubject = Tk.Button(master=self.rootTOP, text='OpenSubject', command=self.opensubject)
-        self.buttonOpenVideos = Tk.Button(master=self.rootTOP, text='OpenVideos', command=self.openvideos)
 
         self.scrollbary = Tk.Scale(master=self.rootMIDDLE2, orient=Tk.VERTICAL, from_=0, to=100)
         self.scrollbarx = Tk.Scale(master=self.rootBOT, orient=Tk.HORIZONTAL, from_=0, to=50)
@@ -231,7 +259,6 @@ class App(Tk.Tk):
         self.listbox.bind('<Key>', self.listbox_callback)
 
         self.buttonOpenSubject.pack(side=Tk.LEFT)
-        self.buttonOpenVideos.pack(side=Tk.LEFT)
         self.buttonPlay.pack(side=Tk.LEFT)
         self.buttonPause.pack(side=Tk.LEFT)
         self.buttonClearPlot.pack(side=Tk.LEFT)
@@ -249,22 +276,57 @@ class App(Tk.Tk):
 
     def initPlot(self):
         self.destroycontainer()
-        self.container = Tk.Toplevel(master=self.rootTOP)
-        self.mainplot = MainPlot(self.container, self.selected_files)
-        self.mainplot.dr.connect()
+        self.container = Tk.Toplevel(master=self.rootTOP, bg="white")
+
+        self.container_frameL = Tk.Frame(master=self.container)
+        self.container_frameR = Tk.Frame(master=self.container, bg="white")
+
+        self.canvas = Tk.Canvas(master=self.container_frameL, bg="orange", height = 60)
+        self.rectouter = self.canvas.create_rectangle(self.bar_x0x3[0], 0, self.bar_x0x3[1], 60, fill="black")
+        self.rectinner = self.canvas.create_rectangle(self.bar_x0x3[0]+10, 0, self.bar_x0x3[1]-10, 60, fill="red")
+
+        self.canvas2 = Tk.Canvas(master=self.container_frameL, bg="cyan", height=10)
+        self.rect_playback = self.canvas2.create_rectangle(50,0,60,10, fill="black")
+        self.canvas2.pack(fill=Tk.X, expand=1)
+        self.mainplot = MainPlot(self.container_frameL, self.container_frameR, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.destroymainplot, self.mainplot_axes_fun, self.sock)
+        self.dr = Drag(self.rectinner, self.rectouter, self.canvas, self.mainplot)
+
+        self.container_frameL.pack(side=Tk.LEFT)
+        self.container_frameR.pack(side=Tk.LEFT, anchor=Tk.N)
+
+        self.canvas.pack(fill=Tk.X, expand = 1)
+
         self.container.update()
         aw = self.container.winfo_width()
         ah = self.container.winfo_height()
         self.container.geometry('%dx%d+400+0' % (aw, ah))
+        self.dr.released(None)
+        self.canvas2width = self.canvas2.winfo_width()
+        self.rect_playback_pos()
+
+    def mainplot_axes_fun(self, left, right):
+        self.mainplot_axes = (left, right)
+
+    def rect_playback_pos(self):
+        self.sock.send("gettime".encode())
+        rec = self.sock.recv(20)
+        secs = float(rec) - self.offset
+        x,y = self.mainplot_axes
+        secs_norm = (secs-x) / (y - x)
+        newx = secs_norm * self.canvas2width
+        # print(x, y, secs, self.canvas2width, newx)
+        self.canvas2.coords(self.rect_playback, newx, 0, newx+10, 10)
+        self.after(100, self.rect_playback_pos)
 
     def loop(self):
         self.selected_files = ["cevent_trials.mat", "cevent_eye_roi_child.mat"]
         self.initPlot()
+        self.destroymainplot("cevent_trials.mat")
         self.clearplot()
         self.after(1000, self.loop)
 
     def clearplot(self):
-        sock.sendto("break".encode(), server_address)
+        self.sock.send("break".encode())
         self.destroycontainer()
         self.resetApp()
 
@@ -290,7 +352,7 @@ class App(Tk.Tk):
         return entries
 
     def update_listbox(self, text):
-        self.listbox.delete(len(self.favorites) + 2, Tk.END)
+        self.listbox.delete(len(self.favorites) + len(self.videolist) + 4, Tk.END)
         new_entries = self.search_files(text)
         for n in new_entries:
             self.listbox.insert(Tk.END, n)
@@ -299,24 +361,43 @@ class App(Tk.Tk):
         if event.keysym == 'Return':
             idx = self.listbox.curselection()
             filename = self.listbox.get(idx)
-            self.selected_files.append(filename)
-            self.initPlot()
+            if filename in self.videolist:
+                self.openvideo(self.rootdir + filename)
+            else:
+                self.selected_files.append(self.rootdir + "derived/"+ filename)
+                if self.container == None:
+                    self.initPlot()
+                else:
+                    self.mainplot.add_variable(self.rootdir + "derived/" + filename)
 
     def entry_callback(self, event):
         text = self.entry.get()
         self.update_listbox(text)
 
-    def openvideos(self):
-        command = "open c:/users/sbf/Desktop/cam01.mov 500 500"
-        sock.sendto(command.encode(), server_address)
-        command = "open c:/users/sbf/Desktop/cam02.mov 1000 500"
-        sock.sendto(command.encode(), server_address)
+    def openvideo(self, filename):
+        command = "open " + filename + " " + str(self.videopos)+ " 500"
+        self.videopos += 50
+        self.sock.send(command.encode())
 
     def opensubject(self):
-        self.rootdir = "C:/users/sbf/Desktop/derived"
-        self.files = os.listdir(self.rootdir)
+        self.rootdir = "C:/users/sbf/Desktop/7001/"
+        self.files = os.listdir(self.rootdir+"derived")
         setfiles = set(self.files)
         self.filtered_favorites = list(setfiles.intersection(self.favorites))
+
+        allfolders = os.listdir(self.rootdir)
+
+        self.videolist = []
+        for a in allfolders:
+            videos = os.listdir(self.rootdir + a)
+            for v in videos:
+                vsplit = v.split(".")
+                if vsplit[1] in self.formats:
+                    self.videolist.append(a + "/" + v)
+
+        self.listbox.insert(Tk.END, "== VIDEOS ==")
+        for v in self.videolist:
+            self.listbox.insert(Tk.END, v)
 
         self.listbox.insert(Tk.END, "== FAVORITES ==")
         for i in self.filtered_favorites:
@@ -328,24 +409,30 @@ class App(Tk.Tk):
 
         self.scrollbary.config(to=len(self.files))
 
+    def destroymainplot(self, filename):
+        print(filename)
+        print(self.selected_files)
+        self.selected_files.remove(filename)
+        x0,y0,x1,y1 = self.canvas.coords(self.rectouter)
+        self.bar_x0x3 = (x0, x1)
+        self.destroycontainer()
+        self.initPlot()
+
     def pausevideos(self):
-        sock.sendto("pause".encode(), server_address)
+        self.sock.send("pause".encode())
         return
 
     def playvideos(self):
-        sock.sendto("play".encode(), server_address)
+        self.sock.send("play".encode())
         return
 
     def quitapp(self):
-        sock.sendto("break".encode(), server_address)
+        self.sock.send("break".encode())
         self.quit()
         self.destroy()
 
 
 if __name__ == "__main__":
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_address = ('localhost', 7999)
 
     app = App()
     app.geometry('400x600+0+0')

@@ -55,7 +55,7 @@ static int packet_queue_get(PacketQueue *q, AVPacket *pkt, int block)
       q->nb_packets--;
       q->size -= pkt1->pkt.size;
       *pkt = pkt1->pkt;
-      av_free(pkt1);
+      av_freep(&pkt1);
       ret = 1;
       break;
     } else if (!block) {
