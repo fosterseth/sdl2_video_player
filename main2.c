@@ -199,7 +199,7 @@ void read_from_client(){
         
         if (amt > 0){
             strncpy(buffer_str, buffer, amt);
-            printf("%s\n", buffer_str);
+//            printf("%s\n", buffer_str);
             if (strcmp(buffer_str, "seek+") == 0){
                 set_seek_change(10.0);
             }

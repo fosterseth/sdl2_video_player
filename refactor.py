@@ -224,7 +224,7 @@ class App(Tk.Tk):
         self.container = None
         subprocess.Popen(["c:/users/sbf/Desktop/WORK/main2/Debug/main2.exe", "7999"])
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_address = ('localhost', 7999)
+        server_address = ('127.0.0.1', 7999)
         self.sock.connect(server_address)
 
         self.bar_x0x3 = (0,70)
@@ -389,11 +389,12 @@ class App(Tk.Tk):
 
         self.videolist = []
         for a in allfolders:
-            videos = os.listdir(self.rootdir + a)
-            for v in videos:
-                vsplit = v.split(".")
-                if vsplit[1] in self.formats:
-                    self.videolist.append(a + "/" + v)
+            if ("video_r" in a) and (os.path.isdir(self.rootdir + a)):
+                videos = os.listdir(self.rootdir + a)
+                for v in videos:
+                    vsplit = v.split(".")
+                    if vsplit[1] in self.formats:
+                        self.videolist.append(a + "/" + v)
 
         self.listbox.insert(Tk.END, "== VIDEOS ==")
         for v in self.videolist:
