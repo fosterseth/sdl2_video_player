@@ -203,14 +203,14 @@ void read_from_client(){
             if (strcmp(buffer_str, "seek+") == 0){
                 set_seek_change(10.0);
             }
-            if (strcmp(buffer_str, "seek-") == 0){
+            else if (strcmp(buffer_str, "seek-") == 0){
                 set_seek_change(-10.0);
             }
-            if (strcmp(buffer_str, "break") == 0){
+            else if (strcmp(buffer_str, "break") == 0){
                 all_quit_signal = 1;
                 break;
             }
-            if (strncmp(buffer_str, "open", 4) == 0){
+            else if (strncmp(buffer_str, "open", 4) == 0){
                 char command[1024];
                 strcpy(command, &buffer_str[5]);
 //                memset(filename, '\0', 1024);
@@ -231,20 +231,37 @@ void read_from_client(){
                 push_open_file(filename);
             }
             
-            if (strncmp(buffer_str, "seekto", 6) == 0){
+            else if (strncmp(buffer_str, "seekto", 6) == 0){
                 seek_amount = atof(&buffer_str[7]);
                 set_seek_secs(seek_amount);
             }
-            if (strncmp(buffer_str, "pause", 5) == 0){
+           else if (strncmp(buffer_str, "pause", 5) == 0){
+                if (num_files > 0){
                     run_flag = 0;
                     SDL_PauseAudioDevice(dev, 1);
+                }
             }
-            if (strncmp(buffer_str, "play", 4) == 0){
+            else if (strncmp(buffer_str, "play", 4) == 0){
+                if (num_files > 0){
                 SDL_PauseAudioDevice(dev, 0);
                 run_flag = 1;
+                }
             }
             
-            if (strncmp(buffer_str, "gettime", 7) == 0){
+            else if (strncmp(buffer_str, "toggleplay", 10) == 0){
+//                printf("toggleplay\n");
+                if (num_files > 0){
+                    if (run_flag == 1){
+                        run_flag = 0;
+                        SDL_PauseAudioDevice(dev, 1);
+                    }else if (run_flag == 0){
+                        SDL_PauseAudioDevice(dev, 0);
+                        run_flag = 1;
+                    }
+                }
+            }
+            
+            else if (strncmp(buffer_str, "gettime", 7) == 0){
                 char buf[20];
                 double seconds;
                  if (num_files > 0){
@@ -945,5 +962,6 @@ int main(int argc, char *argv[]){
     }
 
 	SDL_Quit();
+    printf("successfully quit\n");
 	return 0;
 }

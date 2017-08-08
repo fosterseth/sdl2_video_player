@@ -130,6 +130,27 @@ class MainPlot():
         self.boxes_and_labels = []
         self.loaddata(filenames)
 
+    def cstream2cevent(self, cstream):
+        cevent = np.array([[-1, -1, -1]], dtype=np.float64)
+        numrows, numcols = np.shape(cstream)
+        if numcols > 2:
+            return cstream
+        in_event = False
+        prev_category = 0
+        build_event = np.array([[-1, -1, -1]], dtype=np.float64)
+        for c in range(0, numrows):
+            cur_category = cstream[c, 1]
+            if cur_category != prev_category:
+                if build_event[0, 0] > 0:
+                    build_event[0, 1] = cstream[c, 0]
+                    build_event[0, 2] = prev_category
+                    cevent = np.append(cevent, build_event, axis=0)
+                    build_event = np.array([[-1, -1, -1]])
+                elif cur_category > 0:
+                    build_event[0, 0] = cstream[c, 0]
+            prev_category = cur_category
+        return cevent[1:, :]
+
     def draw_rects(self, data, bottom):
         ax = self.ax
         values = data[:, 2].astype(int)
@@ -175,6 +196,7 @@ class MainPlot():
         # axc = self.axc
         bot, top = ax.get_ylim()
         data = self.load_matfile(filename)
+        data = self.cstream2cevent(data)
         rects = self.draw_rects(data, top)
         if bot < 0:
             ax.set_ylim(bottom=0, top=10.5)
@@ -222,26 +244,27 @@ class App(Tk.Tk):
         self.selected_files = []
         self.formats = ["mov", "mp4", "wmv", "mpeg4", "h264"]
         self.container = None
-        subprocess.Popen(["c:/users/sbf/Desktop/WORK/main2/Debug/main2.exe", "7999"])
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_address = ('127.0.0.1', 7999)
-        self.sock.connect(server_address)
+        self.connect()
 
         self.bar_x0x3 = (0,70)
         self.videopos = 500
         self.mainplot_axes = (0,1)
         self.canvas2width = 0
         self.offset = 30.97 - 30
+        self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
+        self.cur_subject = ""
         # self.loop() #check for memory leakage
 
     def initFrames(self):
         self.wm_title("Embedding in TK")
         self.rootTOP = Tk.Frame(master=self)
         self.rootMIDDLE1 = Tk.Frame(master=self, bg="green")
+        self.rootEntry = Tk.Frame(master=self, bg="red")
         self.rootMIDDLE2 = Tk.Frame(master=self, bg="black")
         self.rootBOT = Tk.Frame(master=self, bg="blue")
 
         self.rootTOP.pack(fill=Tk.X)
+        self.rootEntry.pack(fill=Tk.X)
         self.rootMIDDLE1.pack(fill=Tk.X)
         self.rootMIDDLE2.pack(fill=Tk.BOTH, expand=1)
         self.rootBOT.pack(fill=Tk.X)
@@ -251,22 +274,30 @@ class App(Tk.Tk):
         self.buttonPlay = Tk.Button(master=self.rootTOP, text='Play', command=self.playvideos)
         self.buttonPause = Tk.Button(master=self.rootTOP, text='Pause', command=self.pausevideos)
         self.buttonClearPlot = Tk.Button(master=self.rootTOP, text='ClearPlot', command=self.clearplot)
-        self.buttonOpenSubject = Tk.Button(master=self.rootTOP, text='OpenSubject', command=self.opensubject)
+        # self.buttonOpenSubject = Tk.Button(master=self.rootTOP, text='OpenSubject', command=self.opensubject)
 
         self.scrollbary = Tk.Scale(master=self.rootMIDDLE2, orient=Tk.VERTICAL, from_=0, to=100)
         self.scrollbarx = Tk.Scale(master=self.rootBOT, orient=Tk.HORIZONTAL, from_=0, to=50)
         self.listbox = Tk.Listbox(master=self.rootMIDDLE2)
         self.listbox.bind('<Key>', self.listbox_callback)
 
-        self.buttonOpenSubject.pack(side=Tk.LEFT)
+        self.label_subject = Tk.Label(master=self.rootEntry, text="Enter SubjectID or Path")
+        self.entry_subject = Tk.Entry(master=self.rootEntry)
+        self.entry_subject.bind('<Key>', self.entry_subject_callback)
+
+        self.entry = Tk.Entry(master=self.rootMIDDLE1)
+        self.entry.bind('<Key>', self.entry_callback)
+        self.label_variable = Tk.Label(master=self.rootMIDDLE1, text="Enter Variable")
+
+        # self.buttonOpenSubject.pack(side=Tk.LEFT)
         self.buttonPlay.pack(side=Tk.LEFT)
         self.buttonPause.pack(side=Tk.LEFT)
         self.buttonClearPlot.pack(side=Tk.LEFT)
         self.buttonQuit.pack(side=Tk.LEFT)
 
-        self.entry = Tk.Entry(master=self.rootMIDDLE1)
-        self.entry.bind('<Key>', self.entry_callback)
-        self.entry.pack(fill=Tk.X)
+        self.label_variable.pack(side=Tk.LEFT)
+        self.entry.pack(side=Tk.LEFT, fill=Tk.X, expand = 1)
+
 
         self.listbox.pack(side=Tk.LEFT, fill=Tk.BOTH, expand = 1)
         self.scrollbary.pack(side=Tk.LEFT, fill=Tk.Y)
@@ -274,9 +305,14 @@ class App(Tk.Tk):
         self.scrollbary.config(command=self.listbox.yview)
         self.scrollbarx.config(command=self.listbox.xview)
 
+        self.label_subject.pack(side=Tk.LEFT, fill=Tk.X)
+        self.entry_subject.pack(side=Tk.LEFT, fill=Tk.X, expand=1)
+
+
     def initPlot(self):
         self.destroycontainer()
         self.container = Tk.Toplevel(master=self.rootTOP, bg="white")
+        self.container.bind('<Key>', self.root_keypress)
 
         self.container_frameL = Tk.Frame(master=self.container)
         self.container_frameR = Tk.Frame(master=self.container, bg="white")
@@ -304,6 +340,30 @@ class App(Tk.Tk):
         self.canvas2width = self.canvas2.winfo_width()
         self.rect_playback_pos()
 
+    def root_keypress(self, event):
+        # print(event.keysym)
+        if event.keysym == 'space':
+            self.sock.send("toggleplay".encode())
+
+    def connect(self):
+        port = 50001
+        self.serverprocess = subprocess.Popen(["c:/users/sbf/Desktop/WORK/main2/Debug/main2.exe", str(port)])
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_address = ('127.0.0.1', 50001)
+        self.sock.connect(server_address)
+
+    def get_subject_path(self, ID_str):
+        fid = open(self.multidirroot + "subject_table.txt", "r")
+        lines = fid.readlines()
+        subpath = ""
+        for line in lines:
+            line = line.split("\n")[0]
+            linesplit = line.split("\t")
+            if ID_str == linesplit[0]:
+                subpath = self.multidirroot + "experiment_" + linesplit[1] + "/included/" + "__" + linesplit[2] + "_" + linesplit[3] + "/"
+        return subpath
+
+
     def mainplot_axes_fun(self, left, right):
         self.mainplot_axes = (left, right)
 
@@ -326,7 +386,11 @@ class App(Tk.Tk):
         self.after(1000, self.loop)
 
     def clearplot(self):
-        self.sock.send("break".encode())
+        if self.sock != None:
+            self.sock.send("break".encode())
+            stream = self.serverprocess.communicate()[0]
+            rc = self.serverprocess.returncode
+            print(rc)
         self.destroycontainer()
         self.resetApp()
 
@@ -334,6 +398,7 @@ class App(Tk.Tk):
         self.container = None
         self.selected_files = []
         self.listbox.delete(0,Tk.END)
+        self.connect()
 
     def destroycontainer(self):
         if self.container != None:
@@ -370,6 +435,12 @@ class App(Tk.Tk):
                 else:
                     self.mainplot.add_variable(self.rootdir + "derived/" + filename)
 
+
+    def entry_subject_callback(self, event):
+        if event.keysym == 'Return':
+            text = self.entry_subject.get()
+            self.opensubject(text)
+
     def entry_callback(self, event):
         text = self.entry.get()
         self.update_listbox(text)
@@ -379,8 +450,24 @@ class App(Tk.Tk):
         self.videopos += 50
         self.sock.send(command.encode())
 
-    def opensubject(self):
-        self.rootdir = "C:/users/sbf/Desktop/7001/"
+    def get_root_dir(self):
+        subpath = ""
+        text = self.entry_subject.get()
+        if os.path.isdir(text):
+            subpath = text
+        else:
+            subpath = self.get_subject_path(text)
+            if len(subpath) is 0:
+                self.entry_subject.delete(0, Tk.END)
+                self.entry_subject.insert(0,"invalid subject")
+        return subpath
+
+
+    def opensubject(self, text):
+        # self.rootdir = "C:/users/sbf/Desktop/7001/"
+        self.rootdir = self.get_root_dir()
+        if len(self.rootdir) is 0:
+            return
         self.files = os.listdir(self.rootdir+"derived")
         setfiles = set(self.files)
         self.filtered_favorites = list(setfiles.intersection(self.favorites))
