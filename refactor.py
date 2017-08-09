@@ -3,6 +3,7 @@ import scipy.io
 import socket
 import os
 import subprocess
+import win32api
 
 from matplotlib import gridspec
 import matplotlib.pyplot as plt
@@ -206,12 +207,6 @@ class MainPlot():
             ax.set_ylim(top=top + 10.5)
             axname.set_ylim(top=top + 10.5)
             top = top + 10.5
-        # ax.set_xlim(left=data[0, 0], right=data[-1, 1])
-        # axc.set_xlim(left=data[0, 0], right=data[-1, 1])
-        # if data[-1,1] > self.xmax:
-        #     self.xmax = data[-1,1]
-        # if data[0,0] < self.xmin:
-        #     self.xmin = data[0,0]
         box = axname.add_patch(pat.Rectangle((0, top - 10.5), 1, 10, color=self.label_colors[self.numstreams % 2]))
         filenamesplit = filename.split('/')
 
@@ -251,8 +246,11 @@ class App(Tk.Tk):
         self.mainplot_axes = (0,1)
         self.canvas2width = 0
         self.offset = 30.97 - 30
+        # self.multidirroot = self.find_multiwork_path()
         self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
-        self.cur_subject = ""
+        self.subpaths = self.parse_subject_table()
+        self.cur_subject = None
+        self.showing_variables = False
         # self.loop() #check for memory leakage
 
     def initFrames(self):
@@ -274,7 +272,6 @@ class App(Tk.Tk):
         self.buttonPlay = Tk.Button(master=self.rootTOP, text='Play', command=self.playvideos)
         self.buttonPause = Tk.Button(master=self.rootTOP, text='Pause', command=self.pausevideos)
         self.buttonClearPlot = Tk.Button(master=self.rootTOP, text='ClearPlot', command=self.clearplot)
-        # self.buttonOpenSubject = Tk.Button(master=self.rootTOP, text='OpenSubject', command=self.opensubject)
 
         self.scrollbary = Tk.Scale(master=self.rootMIDDLE2, orient=Tk.VERTICAL, from_=0, to=100)
         self.scrollbarx = Tk.Scale(master=self.rootBOT, orient=Tk.HORIZONTAL, from_=0, to=50)
@@ -282,8 +279,11 @@ class App(Tk.Tk):
         self.listbox.bind('<Key>', self.listbox_callback)
 
         self.label_subject = Tk.Label(master=self.rootEntry, text="Enter SubjectID or Path")
-        self.entry_subject = Tk.Entry(master=self.rootEntry)
+        self.entry_subject_str = Tk.StringVar()
+        self.entry_subject_str.trace("w", self.entry_subject_str_callback)
+        self.entry_subject = Tk.Entry(master=self.rootEntry, textvariable=self.entry_subject_str)
         self.entry_subject.bind('<Key>', self.entry_subject_callback)
+
 
         self.entry = Tk.Entry(master=self.rootMIDDLE1)
         self.entry.bind('<Key>', self.entry_callback)
@@ -340,6 +340,21 @@ class App(Tk.Tk):
         self.canvas2width = self.canvas2.winfo_width()
         self.rect_playback_pos()
 
+    def find_multiwork_path(self):
+        drives = win32api.GetLogicalDriveStrings()
+        drives = drives.split('\000')[:-1]
+        multiwork = ""
+        for d in drives:
+            try:
+                info = win32api.GetVolumeInformation(d)
+                if info[0] == 'multiwork':
+                    multiwork = d
+                    break
+            except:
+                print("could not get info for this drive")
+        return multiwork
+
+
     def root_keypress(self, event):
         # print(event.keysym)
         if event.keysym == 'space':
@@ -352,31 +367,33 @@ class App(Tk.Tk):
         server_address = ('127.0.0.1', 50001)
         self.sock.connect(server_address)
 
-    def get_subject_path(self, ID_str):
-        fid = open(self.multidirroot + "subject_table.txt", "r")
-        lines = fid.readlines()
-        subpath = ""
-        for line in lines:
-            line = line.split("\n")[0]
-            linesplit = line.split("\t")
-            if ID_str == linesplit[0]:
-                subpath = self.multidirroot + "experiment_" + linesplit[1] + "/included/" + "__" + linesplit[2] + "_" + linesplit[3] + "/"
-        return subpath
-
+    def parse_subject_table(self):
+        subpaths = []
+        fn = self.multidirroot + "subject_table.txt"
+        if os.path.exists(fn):
+            fid = open(self.multidirroot + "subject_table.txt", "r")
+            lines = fid.readlines()
+            subpaths = []
+            for line in lines:
+                line = line.split("\n")[0]
+                subpath = line.split("\t")[0:4]
+                subpaths.append(subpath)
+        return subpaths
 
     def mainplot_axes_fun(self, left, right):
         self.mainplot_axes = (left, right)
 
     def rect_playback_pos(self):
-        self.sock.send("gettime".encode())
-        rec = self.sock.recv(20)
-        secs = float(rec) - self.offset
-        x,y = self.mainplot_axes
-        secs_norm = (secs-x) / (y - x)
-        newx = secs_norm * self.canvas2width
-        # print(x, y, secs, self.canvas2width, newx)
-        self.canvas2.coords(self.rect_playback, newx, 0, newx+10, 10)
-        self.after(100, self.rect_playback_pos)
+        if self.container != None:
+            self.sock.send("gettime".encode())
+            rec = self.sock.recv(20)
+            secs = float(rec) - self.offset
+            x,y = self.mainplot_axes
+            secs_norm = (secs-x) / (y - x)
+            newx = secs_norm * self.canvas2width
+            # print(x, y, secs, self.canvas2width, newx)
+            self.canvas2.coords(self.rect_playback, newx, 0, newx+10, 10)
+            self.after(100, self.rect_playback_pos)
 
     def loop(self):
         self.selected_files = ["cevent_trials.mat", "cevent_eye_roi_child.mat"]
@@ -416,30 +433,86 @@ class App(Tk.Tk):
                 entries.append(f)
         return entries
 
+    def insert_videos_and_favorites(self):
+        self.listbox.delete(0,Tk.END)
+        self.listbox.insert(Tk.END, "== VIDEOS ==")
+        for v in self.videolist:
+            self.listbox.insert(Tk.END, v)
+
+        self.listbox.insert(Tk.END, "== FAVORITES ==")
+        for i in self.filtered_favorites:
+            self.listbox.insert(Tk.END, i)
+        self.listbox.insert(Tk.END, "===============")
+
+        for i in self.files:
+            self.listbox.insert(Tk.END, i)
+
+        self.showing_variables = True
+
     def update_listbox(self, text):
-        self.listbox.delete(len(self.favorites) + len(self.videolist) + 4, Tk.END)
+        if self.showing_variables is False:
+            self.insert_videos_and_favorites()
+            self.showing_variables = True
+        self.listbox.delete(len(self.favorites) + len(self.videolist) + 2, Tk.END)
         new_entries = self.search_files(text)
         for n in new_entries:
             self.listbox.insert(Tk.END, n)
+        self.scrollbary.config(to=len(new_entries))
+
+    def construct_subpath_from_listbox(self, text):
+        subpath = ""
+        if len(text) > 0:
+            linesplit = text.split("    ")
+            subpath = self.multidirroot + "experiment_" + linesplit[1] + "/included/" + "__" + linesplit[2] + "_" + linesplit[3] + "/"
+        return subpath
 
     def listbox_callback(self, event):
         if event.keysym == 'Return':
             idx = self.listbox.curselection()
-            filename = self.listbox.get(idx)
-            if filename in self.videolist:
-                self.openvideo(self.rootdir + filename)
-            else:
-                self.selected_files.append(self.rootdir + "derived/"+ filename)
-                if self.container == None:
-                    self.initPlot()
+            if self.showing_variables:
+                filename = self.listbox.get(idx)
+                if filename in self.videolist:
+                    self.openvideo(self.rootdir + filename)
                 else:
-                    self.mainplot.add_variable(self.rootdir + "derived/" + filename)
+                    self.selected_files.append(self.rootdir + "derived/"+ filename)
+                    if self.container == None:
+                        self.initPlot()
+                    else:
+                        self.mainplot.add_variable(self.rootdir + "derived/" + filename)
+            else:
+                subpath_str = self.listbox.get(idx)
+                subpath = self.construct_subpath_from_listbox(subpath_str)
+                self.check_subject(subpath)
+
+
+    def search_subjects(self, text):
+        entries = []
+        for s in self.subpaths:
+            subpath = "".join(s)
+            if text in subpath:
+                entries.append(s)
+        return entries
+
+    def update_listbox_with_subjects(self, text):
+        if self.showing_variables is True:
+            self.showing_variables = False
+        self.listbox.delete(0, Tk.END)
+        new_entries = self.search_subjects(text)
+        for n in new_entries:
+            toadd = "    ".join(n)
+            self.listbox.insert(Tk.END, toadd)
+        self.scrollbary.config(to=len(new_entries))
+
+    def entry_subject_str_callback(self, *args):
+        text = self.entry_subject_str.get()
+        self.update_listbox_with_subjects(text)
 
 
     def entry_subject_callback(self, event):
         if event.keysym == 'Return':
-            text = self.entry_subject.get()
-            self.opensubject(text)
+            text = self.listbox.get(0)
+            subpath = self.construct_subpath_from_listbox(text)
+            self.check_subject(subpath)
 
     def entry_callback(self, event):
         text = self.entry.get()
@@ -450,22 +523,35 @@ class App(Tk.Tk):
         self.videopos += 50
         self.sock.send(command.encode())
 
-    def get_root_dir(self):
-        subpath = ""
-        text = self.entry_subject.get()
-        if os.path.isdir(text):
-            subpath = text
-        else:
-            subpath = self.get_subject_path(text)
-            if len(subpath) is 0:
-                self.entry_subject.delete(0, Tk.END)
-                self.entry_subject.insert(0,"invalid subject")
-        return subpath
+    # def get_root_dir(self, subpath):
+    #     if os.path.isdir(text):
+    #         subpath = text
+    #     else:
+    #         subpath = self.get_subject_path(text)
+    #         if len(subpath) is 0:
+    #             self.entry_subject.delete(0, Tk.END)
+    #             self.entry_subject.insert(0,"invalid subject")
+    #     return subpath
 
 
-    def opensubject(self, text):
+    def check_subject(self, subpath):
+        if len(subpath) > 0:
+            if subpath[-1] != '/':
+                subpath = subpath + '/'
+        if subpath == self.cur_subject:
+            return
+        if not os.path.isdir(subpath):
+            self.entry_subject_str.set("Invalid Subject")
+            return
+        if self.cur_subject != "":
+            self.clearplot()
+        self.opensubject(subpath)
+
+    def opensubject(self, subpath):
         # self.rootdir = "C:/users/sbf/Desktop/7001/"
-        self.rootdir = self.get_root_dir()
+        # self.rootdir = self.get_root_dir()
+
+        self.rootdir = subpath
         if len(self.rootdir) is 0:
             return
         self.files = os.listdir(self.rootdir+"derived")
@@ -483,19 +569,10 @@ class App(Tk.Tk):
                     if vsplit[1] in self.formats:
                         self.videolist.append(a + "/" + v)
 
-        self.listbox.insert(Tk.END, "== VIDEOS ==")
-        for v in self.videolist:
-            self.listbox.insert(Tk.END, v)
-
-        self.listbox.insert(Tk.END, "== FAVORITES ==")
-        for i in self.filtered_favorites:
-            self.listbox.insert(Tk.END, i)
-        self.listbox.insert(Tk.END, "===============")
-
-        for i in self.files:
-            self.listbox.insert(Tk.END, i)
+        self.insert_videos_and_favorites()
 
         self.scrollbary.config(to=len(self.files))
+        self.cur_subject = subpath
 
     def destroymainplot(self, filename):
         print(filename)
