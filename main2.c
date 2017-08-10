@@ -113,6 +113,8 @@ struct FileName {
     char filename[1024];
     int xpos;
     int ypos;
+    int width;
+    int height;
 };
 
 SDL_AudioSpec want, have;
@@ -226,17 +228,30 @@ void read_from_client(){
                 printf("opening %s\n", command);
                 char *pch1; 
                 char *pch2;
+                char *pch3;
+                char *pch4;
+                //movie.mp4 500 500 640 480
                 pch1 = strchr(command, ' ');
                 pch2 = strchr(pch1+1, ' ');
+                pch3 = strchr(pch2+1,' ');
+                pch4 = strchr(pch3+1,' ');
+                
+                int h = atoi(pch4+1);
+                *pch4 = '\0';
+                int w = atoi(pch3+1);
+                *pch3 = '\0';
                 int ypos = atoi(pch2+1);
                 *pch2 = '\0'; 
                 int xpos = atoi(pch1);
                 *pch1 = '\0';
+
                 struct FileName *filename;
-                filename = av_mallocz(1024);
+                filename = av_mallocz(sizeof(struct FileName));
                 strcpy(filename->filename, command);
                 filename->xpos = xpos;
                 filename->ypos = ypos;
+                filename->width = w;
+                filename->height = h;
                 push_open_file(filename);
             }
             
@@ -281,6 +296,48 @@ void read_from_client(){
                 sprintf(buf, "%f",  seconds);
                 int buflen = strlen(buf);
                 send(new_socket, buf, buflen, 0);
+            }
+            
+            else if (strncmp(buffer_str, "getpos", 6) == 0){
+                char buf[20];
+                memset(buf, '\0', 20);
+                int v;
+                int videofound = 0;
+                for (v=0; v<20; v++){
+                    if (vs_array[v] != NULL){
+                        if (strcmp(&buffer_str[7], vs_array[v]->src_filename) == 0){
+                            int x, y;
+                            SDL_GetWindowPosition(vs_array[v]->Window, &x, &y);
+                            sprintf(buf, "%d %d %d %d", x,y, vs_array[v]->window_width, vs_array[v]->window_height);
+                            printf("%s\n", buf);
+                            int buflen = strlen(buf);
+                            send(new_socket, buf, buflen, 0);
+                            videofound = 1;
+                            break;
+                        }
+                    }
+                }
+                if (videofound == 0){
+                    sprintf(buf, "%s", "none");
+                    int buflen = strlen(buf);
+                    send(new_socket, buf, buflen,0);
+                }
+            }
+            else if (strcmp(buffer_str, "getnumvideos") == 0){
+                char buf[20];
+                memset(buf, '\0', 20);
+                sprintf(buf, "%d", num_files);
+                int buflen = strlen(buf);
+                send(new_socket, buf, buflen, 0);
+            }
+            
+            else if (strcmp(buffer_str, "raisewindows") == 0){
+                int v;
+                for (v=0; v<20; v++){
+                    if (vs_array[v] != NULL){
+                        SDL_RestoreWindow(vs_array[v]->Window);
+                    }
+                }
             }
         }
         amt = 0;
@@ -341,19 +398,21 @@ void initiate_audio_device(VideoState *vs){
 	SDL_PauseAudioDevice(dev, 0);
 }
 
-int initiate_renderer_window(VideoState *vs, int xpos1, int ypos1){
-    int width = vs->video_dec_ctx->width;
-	int height = vs->video_dec_ctx->height;
-    vs->window_width = width;
-    vs->window_height = height;
+int initiate_renderer_window(VideoState *vs, int xpos1, int ypos1, int width1, int height1){
+    if (width1 <= 0)
+        width1 = vs->video_dec_ctx->width;
+    if (height1 <= 0)
+        height1 = vs->video_dec_ctx->height;
+    vs->window_width = width1;
+    vs->window_height = height1;
 
 	// create window
 	vs->Window = SDL_CreateWindow(
 			"MOVIE",
 			xpos1,
 			ypos1,
-			width,
-			height,
+			width1,
+			height1,
 			SDL_WINDOW_RESIZABLE);
     if (vs->Window == NULL){
         printf("Failed to open window: %s\n", SDL_GetError());
@@ -375,8 +434,8 @@ int initiate_renderer_window(VideoState *vs, int xpos1, int ypos1){
         vs->Renderer,
 		SDL_PIXELFORMAT_IYUV,
         SDL_TEXTUREACCESS_STREAMING,
-        width,
-        height
+        width1,
+        height1
         );
     if (!vs->Texture){
         fprintf(stderr, "Failed to create texture\n");
@@ -633,7 +692,7 @@ void queueAudio_thread(VideoState *vs){
     }
 }
 
-int open_file(char filename[1024], int xpos1, int ypos1){
+int open_file(char filename[1024], int xpos1, int ypos1, int width, int height){
 
 //    char window_name[80];
     
@@ -674,7 +733,7 @@ int open_file(char filename[1024], int xpos1, int ypos1){
     }
     // open renderer window
 //    sprintf(window_name, "MOVIE%d", num_files);
-    if (initiate_renderer_window(vs, xpos1, ypos1) < 0){
+    if (initiate_renderer_window(vs, xpos1, ypos1, width, height) < 0){
         fprintf(stderr, "Could not initiate window\n");
         return -1;
     }
@@ -720,7 +779,7 @@ void handleEvent(const SDL_Event *event){
     double seek_amount;
     if (event->type == userEventType){
         struct FileName *stru_filename = (struct FileName *) event->user.data1;
-        open_file(stru_filename->filename, stru_filename->xpos, stru_filename->ypos);
+        open_file(stru_filename->filename, stru_filename->xpos, stru_filename->ypos, stru_filename->width, stru_filename->height);
         av_freep(&stru_filename);
     }
 	if (event->type == SDL_KEYDOWN){
@@ -955,7 +1014,7 @@ int main(int argc, char *argv[]){
     for (v=2; v<argc; v++){
         char filename[1024];
         strcpy(filename, argv[v]);
-        open_file(filename, x_pos, y_pos);
+        open_file(filename, x_pos, y_pos, 0, 0);
         x_pos += 50;
         y_pos += 50;
     }

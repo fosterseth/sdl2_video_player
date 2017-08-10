@@ -4,6 +4,7 @@ import socket
 import os
 import subprocess
 import win32api
+import json
 
 from matplotlib import gridspec
 import matplotlib.pyplot as plt
@@ -14,6 +15,9 @@ from matplotlib.figure import Figure
 
 import tkinter as Tk
 
+COLOR_BG = "#B30838"
+COLOR_TEXT = "white"
+COLOR_BG_CREAM = "#ECE2CC"
 
 class Drag:
     def __init__(self, rectmain, rectedge, canvas1, mainplot):
@@ -259,15 +263,16 @@ class App(Tk.Tk):
         self.subpaths = self.parse_subject_table()
         self.cur_subject = ""
         self.showing_variables = False
+        self.serverprocess = None
         # self.loop() #check for memory leakage
 
     def initFrames(self):
-        self.wm_title("Embedding in TK")
-        self.rootTOP = Tk.Frame(master=self)
-        self.rootMIDDLE1 = Tk.Frame(master=self, bg="green")
-        self.rootEntry = Tk.Frame(master=self, bg="red")
-        self.rootMIDDLE2 = Tk.Frame(master=self, bg="black")
-        self.rootBOT = Tk.Frame(master=self, bg="blue")
+        self.wm_title("Show-me")
+        self.rootTOP = Tk.Frame(master=self, bg=COLOR_BG)
+        self.rootMIDDLE1 = Tk.Frame(master=self, bg=COLOR_BG)
+        self.rootEntry = Tk.Frame(master=self, bg=COLOR_BG)
+        self.rootMIDDLE2 = Tk.Frame(master=self, bg=COLOR_BG)
+        self.rootBOT = Tk.Frame(master=self, bg=COLOR_BG)
 
         self.rootTOP.pack(fill=Tk.X)
         self.rootEntry.pack(fill=Tk.X)
@@ -276,44 +281,48 @@ class App(Tk.Tk):
         self.rootBOT.pack(fill=Tk.X)
 
     def initWidgets(self):
-        self.buttonQuit = Tk.Button(master=self.rootTOP, text='Quit', command=self.quitapp)
-        self.buttonPlay = Tk.Button(master=self.rootTOP, text='Play', command=self.playvideos)
-        self.buttonPause = Tk.Button(master=self.rootTOP, text='Pause', command=self.pausevideos)
-        self.buttonClearPlot = Tk.Button(master=self.rootTOP, text='ClearPlot', command=self.clearplot)
+        self.buttonQuit = Tk.Button(master=self.rootTOP, text='Quit', command=self.quitapp, bg = COLOR_BG_CREAM)
+        self.buttonPlay = Tk.Button(master=self.rootTOP, text='Play', command=self.playvideos, bg = COLOR_BG_CREAM)
+        self.buttonPause = Tk.Button(master=self.rootTOP, text='Pause', command=self.pausevideos, bg = COLOR_BG_CREAM)
+        self.buttonClearPlot = Tk.Button(master=self.rootTOP, text='ClearPlot', command=self.clearplot, bg = COLOR_BG_CREAM)
+        self.buttonSavelayout = Tk.Button(master=self.rootTOP, text='SaveLayout', command=self.savelayout, bg = COLOR_BG_CREAM)
+        self.buttonRaisewindows = Tk.Button(master=self.rootTOP, text='RaiseWindows', command=self.raisewindows, bg = COLOR_BG_CREAM)
 
-        self.scrollbary = Tk.Scale(master=self.rootMIDDLE2, orient=Tk.VERTICAL, from_=0, to=100)
-        self.scrollbarx = Tk.Scale(master=self.rootBOT, orient=Tk.HORIZONTAL, from_=0, to=50)
-        self.listbox = Tk.Listbox(master=self.rootMIDDLE2)
+        self.scrollbary = Tk.Scale(master=self.rootMIDDLE2, orient=Tk.VERTICAL, from_=0, to=100, bg = COLOR_BG, fg = COLOR_TEXT)
+        self.scrollbarx = Tk.Scale(master=self.rootBOT, orient=Tk.HORIZONTAL, from_=0, to=50, bg = COLOR_BG, fg = COLOR_TEXT)
+        self.listbox = Tk.Listbox(master=self.rootMIDDLE2, bg = COLOR_BG_CREAM)
         self.listbox.bind('<Key>', self.listbox_callback)
 
-        self.label_subject = Tk.Label(master=self.rootEntry, text="Enter SubjectID or Path")
+        self.label_subject = Tk.Label(master=self.rootEntry, text="Enter SubjectID or Path", bg = COLOR_BG, fg = COLOR_TEXT)
         self.entry_subject_str = Tk.StringVar()
         self.entry_subject_str.trace("w", self.entry_subject_str_callback)
-        self.entry_subject = Tk.Entry(master=self.rootEntry, textvariable=self.entry_subject_str)
+        self.entry_subject = Tk.Entry(master=self.rootEntry, textvariable=self.entry_subject_str, bg = COLOR_BG_CREAM)
         self.entry_subject.bind('<Key>', self.entry_subject_callback)
 
-        self.entry = Tk.Entry(master=self.rootMIDDLE1)
+        self.entry = Tk.Entry(master=self.rootMIDDLE1, bg = COLOR_BG_CREAM)
         self.entry.bind('<Key>', self.entry_callback)
-        self.label_variable = Tk.Label(master=self.rootMIDDLE1, text="Enter Variable")
+        self.label_variable = Tk.Label(master=self.rootMIDDLE1, text="Enter Variable", bg = COLOR_BG, fg = COLOR_TEXT)
 
         # self.buttonOpenSubject.pack(side=Tk.LEFT)
-        self.buttonPlay.pack(side=Tk.LEFT)
-        self.buttonPause.pack(side=Tk.LEFT)
-        self.buttonClearPlot.pack(side=Tk.LEFT)
-        self.buttonQuit.pack(side=Tk.LEFT)
+        self.buttonPlay.pack(side=Tk.LEFT, pady=3)
+        self.buttonPause.pack(side=Tk.LEFT, pady=3)
+        self.buttonClearPlot.pack(side=Tk.LEFT, pady=3)
+        self.buttonSavelayout.pack(side=Tk.LEFT, pady=3)
+        self.buttonRaisewindows.pack(side=Tk.LEFT, pady=3)
+        self.buttonQuit.pack(side=Tk.LEFT, pady=3)
 
         self.label_variable.pack(side=Tk.LEFT)
-        self.entry.pack(side=Tk.LEFT, fill=Tk.X, expand = 1)
+        self.entry.pack(side=Tk.LEFT, fill=Tk.X, expand = 1, pady=3)
 
 
-        self.listbox.pack(side=Tk.LEFT, fill=Tk.BOTH, expand = 1)
-        self.scrollbary.pack(side=Tk.LEFT, fill=Tk.Y)
+        self.listbox.pack(side=Tk.LEFT, fill=Tk.BOTH, expand = 1, pady=3)
+        self.scrollbary.pack(side=Tk.LEFT, fill=Tk.Y, pady=3)
         self.scrollbarx.pack(fill=Tk.X)
         self.scrollbary.config(command=self.listbox.yview)
         self.scrollbarx.config(command=self.listbox.xview)
 
-        self.label_subject.pack(side=Tk.LEFT, fill=Tk.X)
-        self.entry_subject.pack(side=Tk.LEFT, fill=Tk.X, expand=1)
+        self.label_subject.pack(side=Tk.LEFT, fill=Tk.X, pady=3)
+        self.entry_subject.pack(side=Tk.LEFT, fill=Tk.X, expand=1, pady=3)
 
 
     def initPlot(self):
@@ -324,9 +333,9 @@ class App(Tk.Tk):
         # self.container_frameL = Tk.Frame(master=self.container)
         # self.container_frameR = Tk.Frame(master=self.container, bg="white")
 
-        self.canvas = Tk.Canvas(master=self.container, bg="orange", height = 60, highlightthickness=0)
+        self.canvas = Tk.Canvas(master=self.container, bg=COLOR_BG_CREAM, height = 60, highlightthickness=0)
         self.rectouter = self.canvas.create_rectangle(self.bar_x0x3[0], 0, self.bar_x0x3[1], 60, fill="black")
-        self.rectinner = self.canvas.create_rectangle(self.bar_x0x3[0]+10, 0, self.bar_x0x3[1]-10, 60, fill="red")
+        self.rectinner = self.canvas.create_rectangle(self.bar_x0x3[0]+10, 0, self.bar_x0x3[1]-10, 60, fill=COLOR_BG)
         # self.canvas.addtag_all("all")
 
         self.canvas2 = Tk.Canvas(master=self.container, bg="cyan", height=10, highlightthickness=0)
@@ -351,6 +360,50 @@ class App(Tk.Tk):
         self.container.geometry('%dx%d+400+0' % (aw, ah))
         self.dr.released(None)
         self.rect_playback_pos()
+
+    def raisewindows(self):
+        if self.sock != None:
+            self.sock.send("raisewindows".encode())
+
+    def savelayout(self):
+        layout = []
+        if self.sock != None:
+            for v in self.videolist:
+                command = "getpos " + self.rootdir + v
+                self.sock.send(command.encode())
+                rec = self.sock.recv(20)
+                print(rec)
+                rec = rec.decode("utf-8")
+                if rec != "none":
+                    recsplit = rec.split(" ")
+                    # print(recsplit)
+                    x = int(recsplit[0])
+                    y = int(recsplit[1])
+                    w = int(recsplit[2])
+                    h = int(recsplit[3])
+                    # print("xywh", v, x, y, w, h)
+                    layout.append((x,y,w,h))
+        if len(layout) > 0:
+            # sort by x, then by y
+            layout = sorted(layout, key=lambda tup: tup[0], reverse=False)
+            # layout = sorted(layout, key=lambda tup: tup[1], reverse=False)
+            # print(json.dumps(layout))
+            fid = open("layoutconfig.txt", "w")
+            fid.write(json.dumps(layout))
+            fid.close()
+
+    def loadlayout(self):
+        layout = None
+        if os.path.exists("layoutconfig.txt"):
+            fid = open("layoutconfig.txt", "r")
+            x = fid.readline()
+            layout = json.loads(x)
+        return layout
+
+    def getnumvideos(self):
+        self.sock.send("getnumvideos".encode())
+        recv = self.sock.recv(20)
+        return int(recv)
 
     def get_offset_frame(self, subpath):
         offset = 0
@@ -457,9 +510,10 @@ class App(Tk.Tk):
     def closeserver(self):
         if self.sock != None:
             self.sock.send("break".encode())
-            stream = self.serverprocess.communicate()[0]
-            rc = self.serverprocess.returncode
-            print(rc)
+            if self.serverprocess != None:
+                stream = self.serverprocess.communicate()[0]
+                rc = self.serverprocess.returncode
+                print(rc)
 
     def clearplot(self):
         self.closeserver()
@@ -574,8 +628,17 @@ class App(Tk.Tk):
         self.update_listbox(text)
 
     def openvideo(self, filename):
-        command = "open " + filename + " " + str(self.videopos)+ " 500"
+        command = "open " + filename + " " + str(self.videopos) + " 500 0 0"
         self.videopos += 50
+        if self.layout != None:
+            idx = self.getnumvideos()
+            if idx < len(self.layout):
+                xywh = self.layout[idx]
+                xywh = [str(i) for i in xywh]
+                xywh = " ".join(xywh)
+                command = "open " + filename + " " + xywh
+                self.videopos -= 50
+        print(command)
         self.sock.send(command.encode())
 
     # def get_root_dir(self, subpath):
@@ -605,7 +668,7 @@ class App(Tk.Tk):
     def opensubject(self, subpath):
         # self.rootdir = "C:/users/sbf/Desktop/7001/"
         # self.rootdir = self.get_root_dir()
-
+        self.layout = self.loadlayout()
         self.rootdir = subpath
         if len(self.rootdir) is 0:
             return
