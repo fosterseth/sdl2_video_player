@@ -8,30 +8,11 @@ import win32api
 from matplotlib import gridspec
 import matplotlib.pyplot as plt
 import matplotlib.patches as pat
-import matplotlib.animation as animation
 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 import tkinter as Tk
-
-class ResizingCanvas(Tk.Canvas):
-    def __init__(self,parent,**kwargs):
-        Tk.Canvas.__init__(self,parent,**kwargs)
-        self.bind("<Configure>", self.on_resize)
-        self.height = self.winfo_reqheight()
-        self.width = self.winfo_reqwidth()
-
-    def on_resize(self,event):
-        # determine the ratio of old width/height to new width/height
-        wscale = float(event.width)/self.width
-        hscale = float(event.height)/self.height
-        self.width = event.width
-        self.height = event.height
-        # resize the canvas
-        self.config(width=self.width, height=self.height)
-        # rescale all the objects tagged with the "all" tag
-        self.scale("all",0,0,wscale,hscale)
 
 
 class Drag:
@@ -103,7 +84,7 @@ class Drag:
 
 
 class MainPlot():
-    def __init__(self, parent, filenames, trials, destroy_fun, mainplot_axes_fun, sock):
+    def __init__(self, parent, filenames, trials, timing, destroy_fun, mainplot_axes_fun, sock, offset_frames):
         self.mainplot_axes_fun = mainplot_axes_fun
         self.sock = sock
         self.fig = Figure(figsize=(12, 4))
@@ -136,7 +117,10 @@ class MainPlot():
         canvas2.get_tk_widget().grid(row=1,column=1, sticky='NSEW')
         canvas2.mpl_connect('button_press_event', self.onclick)
 
-        self.offset = 30.97 - 30
+        camtime = self.get_camTime(timing)
+        camrate = self.get_camRate(timing)
+        self.offset = (offset_frames / camrate) - camtime
+        print(self.offset)
         self.colors = ["#4542f4", "#41f465", "#f44141", "#f441e5"]
         self.label_colors = ["#E9CAF4", "#CAEDF4"]
         self.numstreams = 0
@@ -149,6 +133,12 @@ class MainPlot():
         # self.update_axes(0,1)
         self.boxes_and_labels = []
         self.loaddata(filenames)
+
+    def get_camTime(self, timingfile):
+        return scipy.io.loadmat(timingfile)['trialInfo']['camTime'][0][0][0][0]
+
+    def get_camRate(self, timingfile):
+        return scipy.io.loadmat(timingfile)['trialInfo']['camRate'][0][0][0][0]
 
     def cstream2cevent(self, cstream):
         cevent = np.array([[-1, -1, -1]], dtype=np.float64)
@@ -264,9 +254,8 @@ class App(Tk.Tk):
         self.videopos = 500
         self.mainplot_axes = (0,1)
         self.canvas2width = 0
-        self.offset = 30.97 - 30
-        # self.multidirroot = self.find_multiwork_path()
-        self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
+        self.multidirroot = self.find_multiwork_path()
+        # self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
         self.subpaths = self.parse_subject_table()
         self.cur_subject = None
         self.showing_variables = False
@@ -345,7 +334,7 @@ class App(Tk.Tk):
         self.rect_playback = self.canvas2.create_rectangle(50,0,60,10, fill="black")
         # self.canvas2.pack(fill=Tk.X, expand=1)
         self.canvas2.grid(row=0,column=0, sticky='EW')
-        self.mainplot = MainPlot(self.container, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.destroymainplot, self.mainplot_axes_fun, self.sock)
+        self.mainplot = MainPlot(self.container, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.rootdir+ "derived/timing.mat", self.destroymainplot, self.mainplot_axes_fun, self.sock, self.offset_frame)
         self.dr = Drag(self.rectinner, self.rectouter, self.canvas, self.mainplot)
 
         self.canvas.grid(row=2,column=0, sticky='EW')
@@ -362,6 +351,35 @@ class App(Tk.Tk):
         self.container.geometry('%dx%d+400+0' % (aw, ah))
         self.dr.released(None)
         self.rect_playback_pos()
+
+    def get_offset_frame(self, subpath):
+        offset = 0
+        extra_p_folder = subpath + 'extra_p/'
+        supp_files_folder = subpath + 'supporting_files/'
+        er = ""
+        filefound = False
+        if os.path.exists(extra_p_folder):
+            files = os.listdir(extra_p_folder)
+            for f in files:
+                if f == "extract_range.txt":
+                    er = extra_p_folder + f
+                    filefound = True
+                    break
+
+        if not filefound:
+            if os.path.exists(supp_files_folder):
+                files = os.listdir(supp_files_folder)
+                for f in files:
+                    if f == "extract_range.txt":
+                        er = supp_files_folder + f
+                        filefound = True
+                        break
+        if filefound:
+            fid = open(er, 'r')
+            line = fid.readline()
+            offset = int(line[1:-2])
+            fid.close()
+        return offset
 
     def find_multiwork_path(self):
         drives = win32api.GetLogicalDriveStrings()
@@ -385,7 +403,7 @@ class App(Tk.Tk):
 
     def connect(self):
         port = 50001
-        self.serverprocess = subprocess.Popen(["c:/users/sbf/Desktop/WORK/main2/Debug/main2.exe", str(port)])
+        self.serverprocess = subprocess.Popen(["videoserver/main2.exe", str(port)])
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = ('127.0.0.1', 50001)
         self.sock.connect(server_address)
@@ -401,6 +419,7 @@ class App(Tk.Tk):
                 line = line.split("\n")[0]
                 subpath = line.split("\t")[0:4]
                 subpaths.append(subpath)
+            fid.close()
         return subpaths
 
     def mainplot_axes_fun(self, left, right):
@@ -410,7 +429,7 @@ class App(Tk.Tk):
         if self.container != None:
             self.sock.send("gettime".encode())
             rec = self.sock.recv(20)
-            secs = float(rec) - self.offset
+            secs = float(rec) - self.mainplot.offset
             x,y = self.mainplot_axes
             if (y > x):
                 secs_norm = (secs-x) / (y - x)
@@ -427,12 +446,15 @@ class App(Tk.Tk):
         self.clearplot()
         self.after(1000, self.loop)
 
-    def clearplot(self):
+    def closeserver(self):
         if self.sock != None:
             self.sock.send("break".encode())
             stream = self.serverprocess.communicate()[0]
             rc = self.serverprocess.returncode
             print(rc)
+
+    def clearplot(self):
+        self.closeserver()
         self.destroycontainer()
         self.resetApp()
 
@@ -579,6 +601,7 @@ class App(Tk.Tk):
         self.rootdir = subpath
         if len(self.rootdir) is 0:
             return
+        self.offset_frame = self.get_offset_frame(subpath)
         self.files = os.listdir(self.rootdir+"derived")
         setfiles = set(self.files)
         self.filtered_favorites = list(setfiles.intersection(self.favorites))
@@ -617,7 +640,7 @@ class App(Tk.Tk):
         return
 
     def quitapp(self):
-        self.sock.send("break".encode())
+        self.closeserver()
         self.quit()
         self.destroy()
 
