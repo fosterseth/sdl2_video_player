@@ -281,48 +281,61 @@ class App(Tk.Tk):
         self.rootBOT.pack(fill=Tk.X)
 
     def initWidgets(self):
-        self.buttonQuit = Tk.Button(master=self.rootTOP, text='Quit', command=self.quitapp, bg = COLOR_BG_CREAM)
-        self.buttonPlay = Tk.Button(master=self.rootTOP, text='Play', command=self.playvideos, bg = COLOR_BG_CREAM)
-        self.buttonPause = Tk.Button(master=self.rootTOP, text='Pause', command=self.pausevideos, bg = COLOR_BG_CREAM)
-        self.buttonClearPlot = Tk.Button(master=self.rootTOP, text='ClearPlot', command=self.clearplot, bg = COLOR_BG_CREAM)
-        self.buttonSavelayout = Tk.Button(master=self.rootTOP, text='SaveLayout', command=self.savelayout, bg = COLOR_BG_CREAM)
-        self.buttonRaisewindows = Tk.Button(master=self.rootTOP, text='RaiseWindows', command=self.raisewindows, bg = COLOR_BG_CREAM)
+        self.buttonQuit = Tk.Button(master=self.rootTOP, text='Quit', command=self.quitapp, bg = COLOR_BG_CREAM, borderwidth = 0)
+        self.buttonPlay = Tk.Button(master=self.rootTOP, text='Play', command=self.playvideos, bg = COLOR_BG_CREAM, borderwidth = 0)
+        self.buttonPause = Tk.Button(master=self.rootTOP, text='Pause', command=self.pausevideos, bg = COLOR_BG_CREAM, borderwidth = 0)
+        self.buttonClearPlot = Tk.Button(master=self.rootTOP, text='ClearPlot', command=self.clearplot, bg = COLOR_BG_CREAM, borderwidth = 0)
+        self.buttonSavelayout = Tk.Button(master=self.rootTOP, text='SaveLayout', command=self.savelayout, bg = COLOR_BG_CREAM, borderwidth = 0)
+        self.buttonRaisewindows = Tk.Button(master=self.rootTOP, text='RaiseWindows', command=self.raisewindows, bg = COLOR_BG_CREAM, borderwidth = 0)
 
-        self.scrollbary = Tk.Scale(master=self.rootMIDDLE2, orient=Tk.VERTICAL, from_=0, to=100, bg = COLOR_BG, fg = COLOR_TEXT)
-        self.scrollbarx = Tk.Scale(master=self.rootBOT, orient=Tk.HORIZONTAL, from_=0, to=50, bg = COLOR_BG, fg = COLOR_TEXT)
-        self.listbox = Tk.Listbox(master=self.rootMIDDLE2, bg = COLOR_BG_CREAM)
+        self.scrollbary = Tk.Scale(master=self.rootMIDDLE2, orient=Tk.VERTICAL, from_=0, to=100, bg = COLOR_BG, fg = COLOR_TEXT, borderwidth = 0, showvalue=0)
+        self.scrollbarx = Tk.Scale(master=self.rootBOT, orient=Tk.HORIZONTAL, from_=0, to=50, bg = COLOR_BG, fg = COLOR_TEXT, borderwidth = 0, showvalue=0)
+        self.listbox = Tk.Listbox(master=self.rootMIDDLE2, bg = COLOR_BG_CREAM, borderwidth=0)
         self.listbox.bind('<Key>', self.listbox_callback)
 
         self.label_subject = Tk.Label(master=self.rootEntry, text="Enter SubjectID or Path", bg = COLOR_BG, fg = COLOR_TEXT)
         self.entry_subject_str = Tk.StringVar()
         self.entry_subject_str.trace("w", self.entry_subject_str_callback)
-        self.entry_subject = Tk.Entry(master=self.rootEntry, textvariable=self.entry_subject_str, bg = COLOR_BG_CREAM)
+        self.entry_subject = Tk.Entry(master=self.rootEntry, textvariable=self.entry_subject_str, bg = COLOR_BG_CREAM, borderwidth = 0)
         self.entry_subject.bind('<Key>', self.entry_subject_callback)
 
-        self.entry = Tk.Entry(master=self.rootMIDDLE1, bg = COLOR_BG_CREAM)
-        self.entry.bind('<Key>', self.entry_callback)
-        self.label_variable = Tk.Label(master=self.rootMIDDLE1, text="Enter Variable", bg = COLOR_BG, fg = COLOR_TEXT)
+
+        self.entry_str = Tk.StringVar()
+        self.entry_str.trace("w", self.entry_str_callback)
+        self.entry = Tk.Entry(master=self.rootMIDDLE1, textvariable=self.entry_str, bg=COLOR_BG_CREAM, borderwidth = 0)
+        # self.entry.bind('<Key>', self.entry_callback)
+        self.label_variable = Tk.Label(master=self.rootMIDDLE1, text="Enter Variable Keyword", bg = COLOR_BG, fg = COLOR_TEXT)
 
         # self.buttonOpenSubject.pack(side=Tk.LEFT)
-        self.buttonPlay.pack(side=Tk.LEFT, pady=3)
-        self.buttonPause.pack(side=Tk.LEFT, pady=3)
-        self.buttonClearPlot.pack(side=Tk.LEFT, pady=3)
-        self.buttonSavelayout.pack(side=Tk.LEFT, pady=3)
-        self.buttonRaisewindows.pack(side=Tk.LEFT, pady=3)
-        self.buttonQuit.pack(side=Tk.LEFT, pady=3)
+        px = (3,0)
+        py = (3,0)
+        self.buttonPlay.pack(side=Tk.LEFT, pady=py, padx = px)
+        self.buttonPause.pack(side=Tk.LEFT, pady=py, padx = px)
+        self.buttonClearPlot.pack(side=Tk.LEFT, pady=py, padx = px)
+        self.buttonSavelayout.pack(side=Tk.LEFT, pady=py, padx = px)
+        self.buttonRaisewindows.pack(side=Tk.LEFT, pady=py, padx = px)
+        self.buttonQuit.pack(side=Tk.LEFT, pady=py, padx = px)
 
         self.label_variable.pack(side=Tk.LEFT)
-        self.entry.pack(side=Tk.LEFT, fill=Tk.X, expand = 1, pady=3)
+        self.entry.pack(side=Tk.LEFT, fill=Tk.X, expand = 1, pady=py, padx=(0,3))
 
 
-        self.listbox.pack(side=Tk.LEFT, fill=Tk.BOTH, expand = 1, pady=3)
-        self.scrollbary.pack(side=Tk.LEFT, fill=Tk.Y, pady=3)
+        self.listbox.pack(side=Tk.LEFT, fill=Tk.BOTH, expand = 1, pady=py)
+        self.scrollbary.pack(side=Tk.LEFT, fill=Tk.Y, pady=py)
         self.scrollbarx.pack(fill=Tk.X)
         self.scrollbary.config(command=self.listbox.yview)
         self.scrollbarx.config(command=self.listbox.xview)
 
-        self.label_subject.pack(side=Tk.LEFT, fill=Tk.X, pady=3)
-        self.entry_subject.pack(side=Tk.LEFT, fill=Tk.X, expand=1, pady=3)
+        self.label_subject.pack(side=Tk.LEFT, fill=Tk.X, pady=py)
+        self.entry_subject.pack(side=Tk.LEFT, fill=Tk.X, expand=1, pady=py, padx=(0,3))
+
+        border = 8
+        Tk.Label(master=self.rootBOT, text="Press Enter to add variable/videos/subject to plot", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border, pady=(border,0))
+        Tk.Label(master=self.rootBOT, text="Space to play/pause videos", bg=COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
+        Tk.Label(master=self.rootBOT, text="Up arrow - seek back 10 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
+        Tk.Label(master=self.rootBOT, text="Down arrow - seek forward 10 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
+        Tk.Label(master=self.rootBOT, text="Left arrow - seek back 0.25 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
+        Tk.Label(master=self.rootBOT, text="Right arrow - seek forward 1 frame", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border, pady=(0,border))
 
 
     def initPlot(self):
@@ -623,9 +636,10 @@ class App(Tk.Tk):
             subpath = self.construct_subpath_from_listbox(text)
             self.check_subject(subpath)
 
-    def entry_callback(self, event):
-        text = self.entry.get()
-        self.update_listbox(text)
+    def entry_str_callback(self, *args):
+        if self.showing_variables:
+            text = self.entry_str.get()
+            self.update_listbox(text)
 
     def openvideo(self, filename):
         command = "open " + filename + " " + str(self.videopos) + " 500 0 0"
@@ -719,5 +733,5 @@ class App(Tk.Tk):
 if __name__ == "__main__":
 
     app = App()
-    app.geometry('400x600+0+0')
+    app.geometry('400x700+0+0')
     app.mainloop()
