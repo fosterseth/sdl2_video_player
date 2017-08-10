@@ -203,6 +203,15 @@ void read_from_client(){
             if (strcmp(buffer_str, "seek+") == 0){
                 set_seek_change(10.0);
             }
+            else if (strcmp(buffer_str, "seek-small") == 0){
+                if (!run_flag){
+                    seek_amount = -0.25;
+                    set_seek_change(seek_amount);
+                }
+            }
+            else if (strcmp(buffer_str, "seek+small") == 0){
+                show_one_frame();
+            }
             else if (strcmp(buffer_str, "seek-") == 0){
                 set_seek_change(-10.0);
             }

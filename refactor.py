@@ -400,6 +400,14 @@ class App(Tk.Tk):
         # print(event.keysym)
         if event.keysym == 'space':
             self.sock.send("toggleplay".encode())
+        elif event.keysym == 'Left':
+            self.sock.send("seek-small".encode())
+        elif event.keysym == 'Right':
+            self.sock.send("seek+small".encode())
+        elif event.keysym == 'Down':
+            self.sock.send("seek+".encode())
+        elif event.keysym == 'Up':
+            self.sock.send("seek-".encode())
 
     def connect(self):
         port = 50001
