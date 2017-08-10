@@ -19,6 +19,34 @@ COLOR_BG = "#B30838"
 COLOR_TEXT = "white"
 COLOR_BG_CREAM = "#ECE2CC"
 
+colors = ["#0000FF",
+"#00FF00",
+"#FF0000",
+"#FF00FF",
+"#FFFF00",
+"#00FFFF",
+"#8000FF",
+"#FF0080",
+"#FF8000",
+"#D6D6D6",
+"#D3D9FF",
+"#C7FFFD",
+"#D0FFD4",
+"#FFDBD4",
+"#58E1E1",
+"#BC4BC5",
+"#69C6A6",
+"#F0F592",
+"#ADCE97",
+"#4E8BB6",
+"#864FEC",
+"#D66192",
+"#581F63",
+"#6C7952",
+"#2C5554",
+"#47487B",
+"#139427"]
+
 class Drag:
     def __init__(self, rectmain, rectedge, canvas1, mainplot):
         self.canvas = canvas1
@@ -125,7 +153,7 @@ class MainPlot():
         camrate = self.get_camRate(timing)
         self.offset = (offset_frames / camrate) - camtime
         print(self.offset)
-        self.colors = ["#4542f4", "#41f465", "#f44141", "#f441e5"]
+        # self.colors = ["#4542f4", "#41f465", "#f44141", "#f441e5"]
         self.label_colors = ["#E9CAF4", "#CAEDF4"]
         self.numstreams = 0
 
@@ -169,7 +197,7 @@ class MainPlot():
         ax = self.ax
         values = data[:, 2].astype(int)
         prev_off = -1
-        all_rects = []
+        lencolors = len(colors)
         for i in range(0, np.size(data[:, 0])):
             dur = data[i, 1] - data[i, 0]
             if dur > 0:
@@ -179,8 +207,11 @@ class MainPlot():
                 else:
                     height = 10
                 prev_off = data[i, 1]
-                patch = ax.add_patch(pat.Rectangle((data[i, 0], bottom), dur, height, color=self.colors[values[i] - 1]))
-                all_rects.append(patch)
+                if (values[i]-1) > lencolors:
+                    idx = (values[i]-1) % lencolors
+                else:
+                    idx = values[i]-1
+                ax.add_patch(pat.Rectangle((data[i, 0], bottom), dur, height, color=colors[idx]))
 
     def load_matfile(self, filename):
         return scipy.io.loadmat(filename)['sdata'][0][0][1]
@@ -264,6 +295,7 @@ class App(Tk.Tk):
         self.cur_subject = ""
         self.showing_variables = False
         self.serverprocess = None
+        self.showhelp = False
         # self.loop() #check for memory leakage
 
     def initFrames(self):
@@ -273,12 +305,14 @@ class App(Tk.Tk):
         self.rootEntry = Tk.Frame(master=self, bg=COLOR_BG)
         self.rootMIDDLE2 = Tk.Frame(master=self, bg=COLOR_BG)
         self.rootBOT = Tk.Frame(master=self, bg=COLOR_BG)
+        self.rootHELP = Tk.Frame(master=self, bg=COLOR_BG)
 
         self.rootTOP.pack(fill=Tk.X)
         self.rootEntry.pack(fill=Tk.X)
         self.rootMIDDLE1.pack(fill=Tk.X)
         self.rootMIDDLE2.pack(fill=Tk.BOTH, expand=1)
         self.rootBOT.pack(fill=Tk.X)
+        self.rootHELP.pack(fill=Tk.BOTH)
 
     def initWidgets(self):
         self.buttonQuit = Tk.Button(master=self.rootTOP, text='Quit', command=self.quitapp, bg = COLOR_BG_CREAM, borderwidth = 0)
@@ -287,6 +321,7 @@ class App(Tk.Tk):
         self.buttonClearPlot = Tk.Button(master=self.rootTOP, text='ClearPlot', command=self.clearplot, bg = COLOR_BG_CREAM, borderwidth = 0)
         self.buttonSavelayout = Tk.Button(master=self.rootTOP, text='SaveLayout', command=self.savelayout, bg = COLOR_BG_CREAM, borderwidth = 0)
         self.buttonRaisewindows = Tk.Button(master=self.rootTOP, text='RaiseWindows', command=self.raisewindows, bg = COLOR_BG_CREAM, borderwidth = 0)
+        self.buttonHelp = Tk.Button(master=self.rootTOP, text='Help', command=self.showhelp, bg = COLOR_BG_CREAM, borderwidth = 0)
 
         self.scrollbary = Tk.Scale(master=self.rootMIDDLE2, orient=Tk.VERTICAL, from_=0, to=100, bg = COLOR_BG, fg = COLOR_TEXT, borderwidth = 0, showvalue=0)
         self.scrollbarx = Tk.Scale(master=self.rootBOT, orient=Tk.HORIZONTAL, from_=0, to=50, bg = COLOR_BG, fg = COLOR_TEXT, borderwidth = 0, showvalue=0)
@@ -315,6 +350,7 @@ class App(Tk.Tk):
         self.buttonSavelayout.pack(side=Tk.LEFT, pady=py, padx = px)
         self.buttonRaisewindows.pack(side=Tk.LEFT, pady=py, padx = px)
         self.buttonQuit.pack(side=Tk.LEFT, pady=py, padx = px)
+        self.buttonHelp.pack(side=Tk.LEFT, pady=py, padx = px)
 
         self.label_variable.pack(side=Tk.LEFT)
         self.entry.pack(side=Tk.LEFT, fill=Tk.X, expand = 1, pady=py, padx=(0,3))
@@ -330,12 +366,12 @@ class App(Tk.Tk):
         self.entry_subject.pack(side=Tk.LEFT, fill=Tk.X, expand=1, pady=py, padx=(0,3))
 
         border = 8
-        Tk.Label(master=self.rootBOT, text="Press Enter to add variable/videos/subject to plot", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border, pady=(border,0))
-        Tk.Label(master=self.rootBOT, text="Space to play/pause videos", bg=COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
-        Tk.Label(master=self.rootBOT, text="Up arrow - seek back 10 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
-        Tk.Label(master=self.rootBOT, text="Down arrow - seek forward 10 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
-        Tk.Label(master=self.rootBOT, text="Left arrow - seek back 0.25 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
-        Tk.Label(master=self.rootBOT, text="Right arrow - seek forward 1 frame", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border, pady=(0,border))
+        Tk.Label(master=self.rootHELP, text="Press Enter to add variable/videos/subject to plot", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border, pady=(border,0))
+        Tk.Label(master=self.rootHELP, text="Space to play/pause videos", bg=COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
+        Tk.Label(master=self.rootHELP, text="Up arrow - seek back 10 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
+        Tk.Label(master=self.rootHELP, text="Down arrow - seek forward 10 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
+        Tk.Label(master=self.rootHELP, text="Left arrow - seek back 0.25 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
+        Tk.Label(master=self.rootHELP, text="Right arrow - seek forward 1 frame", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border, pady=(0,border))
 
 
     def initPlot(self):
@@ -373,6 +409,14 @@ class App(Tk.Tk):
         self.container.geometry('%dx%d+400+0' % (aw, ah))
         self.dr.released(None)
         self.rect_playback_pos()
+
+    def showhelp(self):
+        if self.showhelp:
+            self.rootHELP.pack(fill=Tk.BOTH)
+            self.showhelp = False
+        else:
+            self.rootHELP.pack_forget()
+            self.showhelp = True
 
     def raisewindows(self):
         if self.sock != None:
@@ -733,5 +777,5 @@ class App(Tk.Tk):
 if __name__ == "__main__":
 
     app = App()
-    app.geometry('400x700+0+0')
+    app.geometry('400x600+0+0')
     app.mainloop()
