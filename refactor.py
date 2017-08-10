@@ -254,10 +254,10 @@ class App(Tk.Tk):
         self.videopos = 500
         self.mainplot_axes = (0,1)
         self.canvas2width = 0
-        self.multidirroot = self.find_multiwork_path()
-        # self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
+        # self.multidirroot = self.find_multiwork_path()
+        self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
         self.subpaths = self.parse_subject_table()
-        self.cur_subject = None
+        self.cur_subject = ""
         self.showing_variables = False
         # self.loop() #check for memory leakage
 
@@ -403,7 +403,7 @@ class App(Tk.Tk):
 
     def connect(self):
         port = 50001
-        self.serverprocess = subprocess.Popen(["videoserver/main2.exe", str(port)])
+        self.serverprocess = subprocess.Popen(["c:/users/sbf/Desktop/videoserver/main2.exe", str(port)])
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = ('127.0.0.1', 50001)
         self.sock.connect(server_address)
