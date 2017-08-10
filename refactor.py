@@ -15,6 +15,25 @@ from matplotlib.figure import Figure
 
 import tkinter as Tk
 
+class ResizingCanvas(Tk.Canvas):
+    def __init__(self,parent,**kwargs):
+        Tk.Canvas.__init__(self,parent,**kwargs)
+        self.bind("<Configure>", self.on_resize)
+        self.height = self.winfo_reqheight()
+        self.width = self.winfo_reqwidth()
+
+    def on_resize(self,event):
+        # determine the ratio of old width/height to new width/height
+        wscale = float(event.width)/self.width
+        hscale = float(event.height)/self.height
+        self.width = event.width
+        self.height = event.height
+        # resize the canvas
+        self.config(width=self.width, height=self.height)
+        # rescale all the objects tagged with the "all" tag
+        self.scale("all",0,0,wscale,hscale)
+
+
 class Drag:
     def __init__(self, rectmain, rectedge, canvas1, mainplot):
         self.canvas = canvas1
@@ -84,7 +103,7 @@ class Drag:
 
 
 class MainPlot():
-    def __init__(self, parent, parent2, filenames, trials, destroy_fun, mainplot_axes_fun, sock):
+    def __init__(self, parent, filenames, trials, destroy_fun, mainplot_axes_fun, sock):
         self.mainplot_axes_fun = mainplot_axes_fun
         self.sock = sock
         self.fig = Figure(figsize=(12, 4))
@@ -106,15 +125,15 @@ class MainPlot():
 
         # a tk.DrawingArea
         canvas = FigureCanvasTkAgg(self.fig, master=parent)
+        canvas.get_tk_widget().config(highlightthickness=0)
         canvas.show()
-        canvas.get_tk_widget().pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
-
-        canvas._tkcanvas.pack(side=Tk.TOP, fill=Tk.BOTH, expand=1)
+        canvas.get_tk_widget().grid(row=1,column=0, sticky='NSEW')
         canvas.mpl_connect('button_press_event', self.onclick)
 
-        canvas2 = FigureCanvasTkAgg(self.fig2, master=parent2)
+        canvas2 = FigureCanvasTkAgg(self.fig2, master=parent)
+        canvas2.get_tk_widget().config(highlightthickness=0)
         canvas2.show()
-        canvas2.get_tk_widget().pack(side=Tk.LEFT, fill=Tk.BOTH, expand=1)
+        canvas2.get_tk_widget().grid(row=1,column=1, sticky='NSEW')
         canvas2.mpl_connect('button_press_event', self.onclick)
 
         self.offset = 30.97 - 30
@@ -178,8 +197,8 @@ class MainPlot():
 
     def onclick(self, event):
         if event.inaxes == self.ax:
-            print('button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
-                  (event.button, event.x, event.y, event.xdata, event.ydata))
+            # print('button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
+            #       (event.button, event.x, event.y, event.xdata, event.ydata))
             command = "seekto " + str(event.xdata + self.offset)
             self.sock.send(command.encode())
         if event.inaxes == self.axname:
@@ -284,7 +303,6 @@ class App(Tk.Tk):
         self.entry_subject = Tk.Entry(master=self.rootEntry, textvariable=self.entry_subject_str)
         self.entry_subject.bind('<Key>', self.entry_subject_callback)
 
-
         self.entry = Tk.Entry(master=self.rootMIDDLE1)
         self.entry.bind('<Key>', self.entry_callback)
         self.label_variable = Tk.Label(master=self.rootMIDDLE1, text="Enter Variable")
@@ -314,30 +332,35 @@ class App(Tk.Tk):
         self.container = Tk.Toplevel(master=self.rootTOP, bg="white")
         self.container.bind('<Key>', self.root_keypress)
 
-        self.container_frameL = Tk.Frame(master=self.container)
-        self.container_frameR = Tk.Frame(master=self.container, bg="white")
+        # self.container_frameL = Tk.Frame(master=self.container)
+        # self.container_frameR = Tk.Frame(master=self.container, bg="white")
 
-        self.canvas = Tk.Canvas(master=self.container_frameL, bg="orange", height = 60)
+        self.canvas = Tk.Canvas(master=self.container, bg="orange", height = 60, highlightthickness=0)
         self.rectouter = self.canvas.create_rectangle(self.bar_x0x3[0], 0, self.bar_x0x3[1], 60, fill="black")
         self.rectinner = self.canvas.create_rectangle(self.bar_x0x3[0]+10, 0, self.bar_x0x3[1]-10, 60, fill="red")
+        # self.canvas.addtag_all("all")
 
-        self.canvas2 = Tk.Canvas(master=self.container_frameL, bg="cyan", height=10)
+        self.canvas2 = Tk.Canvas(master=self.container, bg="cyan", height=10, highlightthickness=0)
+        # self.canvas2.addtag_all("all")
         self.rect_playback = self.canvas2.create_rectangle(50,0,60,10, fill="black")
-        self.canvas2.pack(fill=Tk.X, expand=1)
-        self.mainplot = MainPlot(self.container_frameL, self.container_frameR, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.destroymainplot, self.mainplot_axes_fun, self.sock)
+        # self.canvas2.pack(fill=Tk.X, expand=1)
+        self.canvas2.grid(row=0,column=0, sticky='EW')
+        self.mainplot = MainPlot(self.container, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.destroymainplot, self.mainplot_axes_fun, self.sock)
         self.dr = Drag(self.rectinner, self.rectouter, self.canvas, self.mainplot)
 
-        self.container_frameL.pack(side=Tk.LEFT)
-        self.container_frameR.pack(side=Tk.LEFT, anchor=Tk.N)
+        self.canvas.grid(row=2,column=0, sticky='EW')
 
-        self.canvas.pack(fill=Tk.X, expand = 1)
+        self.container.grid_columnconfigure(0, weight=1)
+        self.container.grid_columnconfigure(1, weight=1, minsize=200)
+        self.container.grid_rowconfigure(0, weight=1)
+        self.container.grid_rowconfigure(1, weight=30)
+        self.container.grid_rowconfigure(2, weight=1)
 
         self.container.update()
         aw = self.container.winfo_width()
         ah = self.container.winfo_height()
         self.container.geometry('%dx%d+400+0' % (aw, ah))
         self.dr.released(None)
-        self.canvas2width = self.canvas2.winfo_width()
         self.rect_playback_pos()
 
     def find_multiwork_path(self):
@@ -389,10 +412,12 @@ class App(Tk.Tk):
             rec = self.sock.recv(20)
             secs = float(rec) - self.offset
             x,y = self.mainplot_axes
-            secs_norm = (secs-x) / (y - x)
-            newx = secs_norm * self.canvas2width
-            # print(x, y, secs, self.canvas2width, newx)
-            self.canvas2.coords(self.rect_playback, newx, 0, newx+10, 10)
+            if (y > x):
+                secs_norm = (secs-x) / (y - x)
+                canvas2width = self.canvas2.winfo_width()
+                newx = secs_norm * canvas2width
+                # print(x, y, secs, self.canvas2width, newx)
+                self.canvas2.coords(self.rect_playback, newx, 0, newx+10, 10)
             self.after(100, self.rect_playback_pos)
 
     def loop(self):
