@@ -375,10 +375,7 @@ class App(Tk.Tk):
         Tk.Tk.__init__(self)
         self.initFrames()
         self.initWidgets()
-        self.favorites = ['cevent_eye_roi_child.mat', 'cevent_eye_roi_parent.mat', 'cevent_inhand_child.mat',
-                     'cevent_inhand_parent.mat', 'cevent_eye_joint-attend_both.mat',
-                     'cevent_speech_naming_local-id.mat', 'cevent_speech_utterance.mat',
-                     'cevent_trials.mat', 'cont_vision_size_obj1_child.mat']
+        self.favorites = self.load_favorites()
         self.selected_files = []
         self.formats = ["mov", "mp4", "wmv", "mpeg4", "h264"]
         self.container = None
@@ -562,16 +559,30 @@ class App(Tk.Tk):
             layout = sorted(layout, key=lambda tup: tup[0], reverse=False)
             # layout = sorted(layout, key=lambda tup: tup[1], reverse=False)
             # print(json.dumps(layout))
-            fid = open("layoutconfig.txt", "w")
+            fid = open("config/layout.txt", "w")
             fid.write(json.dumps(layout))
             fid.close()
 
+    def load_favorites(self):
+        if os.path.exists("config/favorites.txt"):
+            fid = open("config/favorites.txt", "r")
+            x = fid.readline()
+            favs = json.loads(x)
+            fid.close()
+        else:
+            favs = ['cevent_eye_roi_child.mat', 'cevent_eye_roi_parent.mat', 'cevent_inhand_child.mat',
+             'cevent_inhand_parent.mat', 'cevent_eye_joint-attend_both.mat',
+             'cevent_speech_naming_local-id.mat', 'cevent_speech_utterance.mat',
+             'cevent_trials.mat']
+        return favs
+
     def loadlayout(self):
         layout = None
-        if os.path.exists("layoutconfig.txt"):
-            fid = open("layoutconfig.txt", "r")
+        if os.path.exists("config/layout.txt"):
+            fid = open("config/layout.txt", "r")
             x = fid.readline()
             layout = json.loads(x)
+            fid.close()
         return layout
 
     def getnumvideos(self):
