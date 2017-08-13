@@ -780,9 +780,10 @@ class App(Tk.Tk):
 
     def search_subjects(self, text):
         entries = []
+        textlen = len(text)
         for s in self.subpaths:
-            subpath = "".join(s)
-            if text in subpath:
+            # subpath = "".join(s)
+            if text == s[0][0:textlen] or text==s[2][0:textlen] or text==s[3][0:textlen]:
                 entries.append(s)
         return entries
 
