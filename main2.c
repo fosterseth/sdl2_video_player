@@ -921,6 +921,7 @@ void close_window(int windowID){
                 if (vs_array[v]->master_audio){
                     packet_queue_flush(&vs_array[v]->audioqueue);
                     swr_free(&vs_array[v]->swr);
+                    looking_for_master_audio = 1;
                 }
                 packet_queue_flush(&vs_array[v]->videoqueue);
                 sws_freeContext(vs_array[v]->sws_ctx);
@@ -998,6 +999,7 @@ void window_resize(SDL_Event *event){
                     fprintf(stderr, "Failed to create texture\n");
                     return -1;
                 }
+                vs_array[v]->show_one = 1;
                 break;
             }
         }
