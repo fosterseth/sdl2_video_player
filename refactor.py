@@ -176,6 +176,7 @@ class MainPlot():
         gs = gridspec.GridSpec(1, 1)
         gs.update(left=0.001, right=0.999, bottom=0.07, top=0.999)
         self.ax = self.fig.add_subplot(gs[0,0])
+        self.cont_y_pos = -1
 
         self.fig2 = Figure(figsize=(2,4))
         self.axname = self.fig2.add_subplot(gs[0,0])
@@ -288,6 +289,23 @@ class MainPlot():
                 if contains:
                     self.destroy_fun(label)
 
+    def event2cevent(self, data):
+        numrows, numcols = np.shape(data)
+        one_array = np.ones((numrows, 1), dtype=np.float64)
+        arracat = np.concatenate((data, one_array), axis=1)
+        return arracat
+
+    def draw_cont(self, data, top):
+        maxval = np.max(data[:,1])
+        vals_norm = np.divide(data[:,1], maxval)
+        vals_scaled = np.multiply(vals_norm, 10)
+        # if self.cont_y_pos >= -1:
+        #     top = self.cont_y_pos
+        # else:
+        #     self.cont_y_pos = top
+        vals_scaled = vals_scaled + top
+        self.ax.plot(data[:,0], vals_scaled)
+
     def add_variable(self, filename):
         print(filename)
         self.numstreams += 1
@@ -306,8 +324,13 @@ class MainPlot():
             self.loaded_variables.append((filename,data))
         else:
             print("%s already loaded" % filename)
-        data = self.cstream2cevent(data)
-        rects = self.draw_rects(data, top)
+        if "/event" in filename:
+            data = self.event2cevent(data)
+        if "/cont_" in filename:
+            self.draw_cont(data, top)
+        else:
+            data = self.cstream2cevent(data)
+            rects = self.draw_rects(data, top)
         if bot < 0:
             ax.set_ylim(bottom=0, top=10.5)
             axname.set_ylim(bottom=0, top=10.5)
@@ -316,6 +339,7 @@ class MainPlot():
             ax.set_ylim(top=top + 10.5)
             axname.set_ylim(top=top + 10.5)
             top = top + 10.5
+
         box = axname.add_patch(pat.Rectangle((0, top - 10.5), 1, 10, color=self.label_colors[self.numstreams % 2]))
         filenamesplit = filename.split('/')
 
@@ -341,8 +365,8 @@ class App(Tk.Tk):
         self.initWidgets()
         self.favorites = ['cevent_eye_roi_child.mat', 'cevent_eye_roi_parent.mat', 'cevent_inhand_child.mat',
                      'cevent_inhand_parent.mat', 'cevent_eye_joint-attend_both.mat',
-                     'cevent_speech_naming_local-id.mat', 'cevent_speech_utterance',
-                     'cevent_trials.mat']
+                     'cevent_speech_naming_local-id.mat', 'cevent_speech_utterance.mat',
+                     'cevent_trials.mat', 'cont_vision_size_obj1_child.mat']
         self.selected_files = []
         self.formats = ["mov", "mp4", "wmv", "mpeg4", "h264"]
         self.container = None
@@ -710,7 +734,7 @@ class App(Tk.Tk):
         if self.showing_variables is False:
             self.insert_videos_and_favorites()
             self.showing_variables = True
-        self.listbox.delete(len(self.favorites) + len(self.videolist) + 2, Tk.END)
+        self.listbox.delete(len(self.favorites) + len(self.videolist) + 3, Tk.END)
         new_entries = self.search_files(text)
         for n in new_entries:
             self.listbox.insert(Tk.END, n)
