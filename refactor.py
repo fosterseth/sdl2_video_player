@@ -251,21 +251,33 @@ class MainPlot():
         ax = self.ax
         values = data[:, 2].astype(int)
         prev_off = -1
+        prev_prev_off = -1
+        prev_was_half = None
         lencolors = len(colors)
         for i in range(0, np.size(data[:, 0])):
+            curr = data[i,:]
             dur = data[i, 1] - data[i, 0]
             if dur > 0:
+                thisbottom = bottom
                 # if rect overlaps, then draw at half height so that both show up
-                if data[i, 1] < prev_off:
+                if (data[i, 0] < prev_off):
                     height = 5
+                    if prev_was_half == "bottom":
+                        prev_was_half = "top"
+                        thisbottom = bottom+5
+                    else:
+                        prev_was_half = "bottom"
                 else:
+                    prev_was_half = None
                     height = 10
-                prev_off = data[i, 1]
+                if prev_off < data[i,1]:
+                    prev_prev_off = prev_off
+                    prev_off = data[i,1]
                 if (values[i]-1) > lencolors:
                     idx = (values[i]-1) % lencolors
                 else:
                     idx = values[i]-1
-                ax.add_patch(pat.Rectangle((data[i, 0], bottom), dur, height, color=colors[idx]))
+                ax.add_patch(pat.Rectangle((data[i, 0], thisbottom), dur, height, color=colors[idx]))
 
     def load_matfile(self, filename):
         return scipy.io.loadmat(filename)['sdata'][0][0][1]
@@ -476,7 +488,7 @@ class App(Tk.Tk):
     def initPlot(self):
         self.destroycontainer()
         self.container = Tk.Toplevel(master=self.rootTOP, bg="white")
-        self.container.bind('<Key>', self.root_keypress)
+        self.container.bind('<KeyRelease>', self.root_keypress)
 
         # self.container_frameL = Tk.Frame(master=self.container)
         # self.container_frameR = Tk.Frame(master=self.container, bg="white")
