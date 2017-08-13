@@ -319,7 +319,7 @@ class MainPlot():
         self.ax.plot(data[:,0], vals_scaled)
 
     def add_variable(self, filename):
-        print(filename)
+        # print(filename)
         self.numstreams += 1
         ax = self.ax
         axname = self.axname
@@ -334,8 +334,8 @@ class MainPlot():
         if data is None:
             data = self.load_matfile(filename)
             self.loaded_variables.append((filename,data))
-        else:
-            print("%s already loaded" % filename)
+        # else:
+        #     print("%s already loaded" % filename)
         if "/event" in filename:
             data = self.event2cevent(data)
         if "/cont_" in filename:
@@ -478,6 +478,7 @@ class App(Tk.Tk):
 
         border = 8
         Tk.Label(master=self.rootHELP, text="Press Enter to add variable/videos/subject to plot", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border, pady=(border,0))
+        Tk.Label(master=self.rootHELP, text="Click variable name to remove from plot", bg=COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
         Tk.Label(master=self.rootHELP, text="Space to play/pause videos", bg=COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
         Tk.Label(master=self.rootHELP, text="Up arrow - seek back 10 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
         Tk.Label(master=self.rootHELP, text="Down arrow - seek forward 10 seconds", bg = COLOR_BG_CREAM).pack(fill=Tk.X, padx=border)
@@ -642,7 +643,7 @@ class App(Tk.Tk):
             self.serverprocess = subprocess.Popen(["videoserver/main2.exe", str(port)])
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = ('127.0.0.1', port)
-        time.sleep(1)
+        time.sleep(.25)
         self.sock.connect(server_address)
         self.thread = netIO(self.queuein, self.queueout, self.sock)
         self.thread.start()
