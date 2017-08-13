@@ -9,11 +9,13 @@ import json
 from matplotlib import gridspec
 import matplotlib.pyplot as plt
 import matplotlib.patches as pat
-
+import threading
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
 import tkinter as Tk
+import time
+import queue
 
 COLOR_BG = "#B30838"
 COLOR_TEXT = "white"
@@ -46,6 +48,56 @@ colors = ["#0000FF",
 "#2C5554",
 "#47487B",
 "#139427"]
+#
+# class netIOtime(threading.Thread):
+#     def __init__(self, sock):
+#         self.sock = sock
+#         threading.Thread.__init__(self)
+#         self.do_stop = False
+#         self.videotime = 0.0
+#     def run(self):
+#         while True:
+#             if self.do_stop:
+#                 return
+#             if self.sock is not None:
+#                 self.sock.send("gettime".encode())
+#                 rec = self.sock.recv(20)
+#                 self.videotime = float(rec)
+#             time.sleep(.01)
+
+class netIO(threading.Thread):
+    def __init__(self, queuein, queueout, sock):
+        self.sock = sock
+        threading.Thread.__init__(self)
+        self.queuein = queuein
+        self.queueout = queueout
+        self.do_stop = False
+        self.videotime = 0.0
+    def run(self):
+        while True:
+            nextinterval = 0.01
+            if self.do_stop:
+                return
+            if self.sock is not None:
+                if not self.queuein.empty():
+                    nextinterval = 0.1
+                    command = self.queuein.get()
+                    # print(command)
+                    self.sock.send(command.encode())
+                    if "getpos" in command:
+                        rec = self.sock.recv(20)
+                        self.queueout.put(rec.decode("utf-8"))
+                    elif command == "getnumvideos":
+                        rec = self.sock.recv(20)
+                        self.queueout.put(int(rec))
+                    elif command == "break":
+                        self.sock = None
+                        # self.do_stop = True
+                else:
+                    self.sock.send("gettime".encode())
+                    rec = self.sock.recv(20)
+                    self.videotime = float(rec)
+            time.sleep(nextinterval)
 
 class Drag:
     def __init__(self, rectmain, rectedge, canvas1, mainplot):
@@ -116,9 +168,9 @@ class Drag:
 
 
 class MainPlot():
-    def __init__(self, parent, filenames, trials, timing, destroy_fun, mainplot_axes_fun, sock, offset_frames):
+    def __init__(self, parent, filenames, trials, timing, destroy_fun, mainplot_axes_fun, queuein, offset_frames, loaded_variables):
         self.mainplot_axes_fun = mainplot_axes_fun
-        self.sock = sock
+        self.queuein = queuein
         self.fig = Figure(figsize=(12, 4))
         self.destroy_fun = destroy_fun
         gs = gridspec.GridSpec(1, 1)
@@ -152,10 +204,11 @@ class MainPlot():
         camtime = self.get_camTime(timing)
         camrate = self.get_camRate(timing)
         self.offset = (offset_frames / camrate) - camtime
-        print(self.offset)
+        # print(self.offset)
         # self.colors = ["#4542f4", "#41f465", "#f44141", "#f441e5"]
         self.label_colors = ["#E9CAF4", "#CAEDF4"]
         self.numstreams = 0
+        self.loaded_variables = loaded_variables
 
         data = self.load_matfile(trials)
         # self.xmin = float('Inf')
@@ -219,13 +272,15 @@ class MainPlot():
     def loaddata(self, filenames):
         for f in filenames:
             self.add_variable(f)
+        self.ax.figure.canvas.draw()
+        self.axname.figure.canvas.draw()
 
     def onclick(self, event):
         if event.inaxes == self.ax:
             # print('button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
             #       (event.button, event.x, event.y, event.xdata, event.ydata))
             command = "seekto " + str(event.xdata + self.offset)
-            self.sock.send(command.encode())
+            self.queuein.put(command)
         if event.inaxes == self.axname:
             for b in self.boxes_and_labels:
                 box, label = b
@@ -240,7 +295,17 @@ class MainPlot():
         axname = self.axname
         # axc = self.axc
         bot, top = ax.get_ylim()
-        data = self.load_matfile(filename)
+        data = None
+        if len(self.loaded_variables) > 0:
+            for f in self.loaded_variables:
+                if filename == f[0]:
+                    data = f[1]
+                    break
+        if data is None:
+            data = self.load_matfile(filename)
+            self.loaded_variables.append((filename,data))
+        else:
+            print("%s already loaded" % filename)
         data = self.cstream2cevent(data)
         rects = self.draw_rects(data, top)
         if bot < 0:
@@ -256,8 +321,6 @@ class MainPlot():
 
         text = axname.text(0, top - 6.5, filenamesplit[-1])
         self.boxes_and_labels.append((box,filename))
-        ax.figure.canvas.draw()
-        axname.figure.canvas.draw()
 
     def update_axes(self, xlim1, xlim2):
         width = self.xmax - self.xmin
@@ -283,19 +346,31 @@ class App(Tk.Tk):
         self.selected_files = []
         self.formats = ["mov", "mp4", "wmv", "mpeg4", "h264"]
         self.container = None
-        self.connect()
+        self.mainplot = None
+        self.loaded_variables = []
 
         self.bar_x0x3 = (0,70)
         self.videopos = 500
         self.mainplot_axes = (0,1)
         self.canvas2width = 0
-        # self.multidirroot = self.find_multiwork_path()
-        self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
+        self.multidirroot = self.find_multiwork_path()
+        if len(self.multidirroot) == 0:
+            self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
+        self.queuein = queue.Queue()
+        self.queueout = queue.Queue()
+        self.connect()
         self.subpaths = self.parse_subject_table()
         self.cur_subject = ""
         self.showing_variables = False
         self.serverprocess = None
         self.showhelp = False
+        # self.thread = netIO(self.queuein, self.queueout, self.sock)
+        # self.thread.start()
+
+        # self.connect2()
+        # self.thread2 = netIOtime(self.sock2)
+        # self.thread2.start()
+        self.after(100, self.rect_playback_pos)
         # self.loop() #check for memory leakage
 
     def initFrames(self):
@@ -392,7 +467,7 @@ class App(Tk.Tk):
         self.rect_playback = self.canvas2.create_rectangle(50,0,60,10, fill="black")
         # self.canvas2.pack(fill=Tk.X, expand=1)
         self.canvas2.grid(row=0,column=0, sticky='EW')
-        self.mainplot = MainPlot(self.container, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.rootdir+ "derived/timing.mat", self.destroymainplot, self.mainplot_axes_fun, self.sock, self.offset_frame)
+        self.mainplot = MainPlot(self.container, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.rootdir+ "derived/timing.mat", self.destroymainplot, self.mainplot_axes_fun, self.queuein, self.offset_frame, self.loaded_variables)
         self.dr = Drag(self.rectinner, self.rectouter, self.canvas, self.mainplot)
 
         self.canvas.grid(row=2,column=0, sticky='EW')
@@ -408,7 +483,6 @@ class App(Tk.Tk):
         ah = self.container.winfo_height()
         self.container.geometry('%dx%d+400+0' % (aw, ah))
         self.dr.released(None)
-        self.rect_playback_pos()
 
     def showhelp(self):
         if self.showhelp:
@@ -419,27 +493,33 @@ class App(Tk.Tk):
             self.showhelp = True
 
     def raisewindows(self):
-        if self.sock != None:
-            self.sock.send("raisewindows".encode())
+        self.queuein.put("raisewindows")
+
+    # def process_queue(self):
+    #     try:
+    #         msg = self.queue.get(0)
+    #         # Show result of the task if needed
+    #         self.rect_playback_pos(msg)
+    #     except queue.Empty:
+    #         pass
+    #     self.after(100, self.process_queue)
+
 
     def savelayout(self):
         layout = []
-        if self.sock != None:
-            for v in self.videolist:
-                command = "getpos " + self.rootdir + v
-                self.sock.send(command.encode())
-                rec = self.sock.recv(20)
-                print(rec)
-                rec = rec.decode("utf-8")
-                if rec != "none":
-                    recsplit = rec.split(" ")
-                    # print(recsplit)
-                    x = int(recsplit[0])
-                    y = int(recsplit[1])
-                    w = int(recsplit[2])
-                    h = int(recsplit[3])
-                    # print("xywh", v, x, y, w, h)
-                    layout.append((x,y,w,h))
+        for v in self.videolist:
+            command = "getpos " + self.rootdir + v
+            self.queuein.put(command)
+            rec = self.queueout.get()
+            if rec != "none":
+                recsplit = rec.split(" ")
+                # print(recsplit)
+                x = int(recsplit[0])
+                y = int(recsplit[1])
+                w = int(recsplit[2])
+                h = int(recsplit[3])
+                # print("xywh", v, x, y, w, h)
+                layout.append((x,y,w,h))
         if len(layout) > 0:
             # sort by x, then by y
             layout = sorted(layout, key=lambda tup: tup[0], reverse=False)
@@ -458,9 +538,8 @@ class App(Tk.Tk):
         return layout
 
     def getnumvideos(self):
-        self.sock.send("getnumvideos".encode())
-        recv = self.sock.recv(20)
-        return int(recv)
+        self.queuein.put("getnumvideos")
+        return self.queueout.get()
 
     def get_offset_frame(self, subpath):
         offset = 0
@@ -509,22 +588,29 @@ class App(Tk.Tk):
     def root_keypress(self, event):
         # print(event.keysym)
         if event.keysym == 'space':
-            self.sock.send("toggleplay".encode())
+            self.queuein.put("toggleplay")
         elif event.keysym == 'Left':
-            self.sock.send("seek-small".encode())
+            self.queuein.put("seek-small")
         elif event.keysym == 'Right':
-            self.sock.send("seek+small".encode())
+            self.queuein.put("seek+small")
         elif event.keysym == 'Down':
-            self.sock.send("seek+".encode())
+            self.queuein.put("seek+")
         elif event.keysym == 'Up':
-            self.sock.send("seek-".encode())
+            self.queuein.put("seek-")
 
     def connect(self):
         port = 50001
-        self.serverprocess = subprocess.Popen(["c:/users/sbf/Desktop/videoserver/main2.exe", str(port)])
+        if self.multidirroot == "c:/users/sbf/Desktop/multiwork/":
+            self.serverprocess = subprocess.Popen(["c:/users/sbf/Desktop/videoserver/main2.exe", str(port)])
+        else:
+            self.serverprocess = subprocess.Popen(["videoserver/main2.exe", str(port)])
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_address = ('127.0.0.1', 50001)
+        server_address = ('127.0.0.1', port)
+        time.sleep(1)
         self.sock.connect(server_address)
+        self.thread = netIO(self.queuein, self.queueout, self.sock)
+        self.thread.start()
+
 
     def parse_subject_table(self):
         subpaths = []
@@ -544,10 +630,9 @@ class App(Tk.Tk):
         self.mainplot_axes = (left, right)
 
     def rect_playback_pos(self):
-        if self.container != None:
-            self.sock.send("gettime".encode())
-            rec = self.sock.recv(20)
-            secs = float(rec) - self.mainplot.offset
+        if self.mainplot is not None:
+            secs = self.thread.videotime
+            secs = secs - self.mainplot.offset
             x,y = self.mainplot_axes
             if (y > x):
                 secs_norm = (secs-x) / (y - x)
@@ -555,7 +640,7 @@ class App(Tk.Tk):
                 newx = secs_norm * canvas2width
                 # print(x, y, secs, self.canvas2width, newx)
                 self.canvas2.coords(self.rect_playback, newx, 0, newx+10, 10)
-            self.after(100, self.rect_playback_pos)
+        self.after(100, self.rect_playback_pos)
 
     def loop(self):
         self.selected_files = ["cevent_trials.mat", "cevent_eye_roi_child.mat"]
@@ -565,27 +650,33 @@ class App(Tk.Tk):
         self.after(1000, self.loop)
 
     def closeserver(self):
-        if self.sock != None:
-            self.sock.send("break".encode())
-            if self.serverprocess != None:
-                stream = self.serverprocess.communicate()[0]
-                rc = self.serverprocess.returncode
-                print(rc)
+        while not self.queuein.empty():
+            pass
+        self.queuein.put("break")
+        if self.serverprocess is not None:
+            stream = self.serverprocess.communicate()[0]
+            rc = self.serverprocess.returncode
+            print(rc)
 
     def clearplot(self):
-        self.closeserver()
+        # self.closeserver()
+        # self.thread.do_stop = True
+        self.queuein.put("closewindows")
         self.destroycontainer()
         self.resetApp()
 
     def resetApp(self):
-        self.container = None
         self.selected_files = []
         self.listbox.delete(0,Tk.END)
-        self.connect()
+        self.loaded_variables = []
+        self.cur_subject = ""
+        # self.connect()
 
     def destroycontainer(self):
-        if self.container != None:
+        if self.container is not None:
             self.container.destroy()
+            self.container = None
+            self.mainplot = None
 
     def search_files(self, text):
         keywords = text.split(" ")
@@ -641,10 +732,10 @@ class App(Tk.Tk):
                     self.openvideo(self.rootdir + filename)
                 else:
                     self.selected_files.append(self.rootdir + "derived/"+ filename)
-                    if self.container == None:
+                    if self.container is None:
                         self.initPlot()
                     else:
-                        self.mainplot.add_variable(self.rootdir + "derived/" + filename)
+                        self.mainplot.loaddata([self.rootdir + "derived/" + filename])
             else:
                 subpath_str = self.listbox.get(idx)
                 subpath = self.construct_subpath_from_listbox(subpath_str)
@@ -688,7 +779,7 @@ class App(Tk.Tk):
     def openvideo(self, filename):
         command = "open " + filename + " " + str(self.videopos) + " 500 0 0"
         self.videopos += 50
-        if self.layout != None:
+        if self.layout is not None:
             idx = self.getnumvideos()
             if idx < len(self.layout):
                 xywh = self.layout[idx]
@@ -696,8 +787,7 @@ class App(Tk.Tk):
                 xywh = " ".join(xywh)
                 command = "open " + filename + " " + xywh
                 self.videopos -= 50
-        print(command)
-        self.sock.send(command.encode())
+        self.queuein.put(command)
 
     # def get_root_dir(self, subpath):
     #     if os.path.isdir(text):
@@ -752,8 +842,8 @@ class App(Tk.Tk):
         self.cur_subject = subpath
 
     def destroymainplot(self, filename):
-        print(filename)
-        print(self.selected_files)
+        # print(filename)
+        # print(self.selected_files)
         self.selected_files.remove(filename)
         x0,y0,x1,y1 = self.canvas.coords(self.rectouter)
         self.bar_x0x3 = (x0, x1)
@@ -761,15 +851,16 @@ class App(Tk.Tk):
         self.initPlot()
 
     def pausevideos(self):
-        self.sock.send("pause".encode())
+        self.queuein.put("pause")
         return
 
     def playvideos(self):
-        self.sock.send("play".encode())
+        self.queuein.put("play")
         return
 
     def quitapp(self):
         self.closeserver()
+        self.thread.do_stop = True
         self.quit()
         self.destroy()
 

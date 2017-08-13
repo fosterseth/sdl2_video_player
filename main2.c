@@ -339,6 +339,15 @@ void read_from_client(){
                     }
                 }
             }
+            
+            else if(strcmp(buffer_str, "closewindows") == 0){
+                int v;
+                for (v=0; v<20; v++){
+                    if (vs_array[v] != NULL){
+                        close_window(vs_array[v]->windowID);
+                    }
+                }
+            }
         }
         amt = 0;
         SDL_Delay(50);
@@ -467,6 +476,9 @@ int decode_packet(VideoState *vs){
 
     return decoded;
 }
+
+
+
 
 int decode_thread(VideoState *vs){
     while (vs->quit_signal == 0){
@@ -746,6 +758,7 @@ int open_file(char filename[1024], int xpos1, int ypos1, int width, int height){
         master_video_secs = &vs->current_video_secs;
     else{
         vs->seek_flag = 1;
+        
         vs->seek_to_secs = *master_video_secs;
     }
     
