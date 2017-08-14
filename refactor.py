@@ -667,9 +667,9 @@ class App(Tk.Tk):
     def connect(self):
         port = 50001
         if self.multidirroot == "c:/users/sbf/Desktop/multiwork/":
-            self.serverprocess = subprocess.Popen(["c:/users/sbf/Desktop/videoserver/main2.exe", str(port)])
+            self.serverprocess = subprocess.Popen(["c:/users/sbf/Desktop/videoserver/vidserv.exe", str(port)])
         else:
-            self.serverprocess = subprocess.Popen(["videoserver/main2.exe", str(port)])
+            self.serverprocess = subprocess.Popen(["videoserver/vidserv.exe", str(port)])
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server_address = ('127.0.0.1', port)
         time.sleep(.25)

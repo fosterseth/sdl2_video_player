@@ -1019,7 +1019,10 @@ int main(int argc, char *argv[]){
     looking_for_master_audio = 1;
     bytes_per_sample = av_get_bytes_per_sample(AV_SAMPLE_FMT_S16);
     
-    portnum = atoi(argv[1]);
+    if (argc > 1)
+        portnum = atoi(argv[1]);
+    else
+        portnum = 50001;
     
     SDL_CreateThread(read_from_client, "read_from_client", NULL);
 	
