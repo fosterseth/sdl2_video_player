@@ -280,7 +280,11 @@ class MainPlot():
                 ax.add_patch(pat.Rectangle((data[i, 0], thisbottom), dur, height, color=colors[idx]))
 
     def load_matfile(self, filename):
-        return scipy.io.loadmat(filename)['sdata'][0][0][1]
+        if ".csv" in filename:
+            data = self.csv2np(filename)
+        else:
+            data = scipy.io.loadmat(filename)['sdata'][0][0][1]
+        return data
 
     def loaddata(self, filenames):
         for f in filenames:
@@ -317,6 +321,17 @@ class MainPlot():
         #     self.cont_y_pos = top
         vals_scaled = vals_scaled + top
         self.ax.plot(data[:,0], vals_scaled)
+
+    def csv2np(self, filename):
+        fid = open(filename, "r")
+        lines = fid.readlines()
+        fid.close()
+        outarray = np.zeros(shape=(1, 3), dtype=np.float64)
+        for line in lines:
+            line = line.split("\n")[0]
+            npline = np.fromstring(line, dtype=np.float64, sep=',')
+            outarray = np.concatenate((outarray, [npline]), axis=0)
+        return outarray[1:, :]
 
     def add_variable(self, filename):
         # print(filename)
