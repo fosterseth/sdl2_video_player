@@ -389,6 +389,7 @@ class App(Tk.Tk):
         self.multidirroot = self.find_multiwork_path()
         if len(self.multidirroot) == 0:
             self.multidirroot = "c:/users/sbf/Desktop/multiwork/"
+        self.working_dir = "derived/"
         self.queuein = queue.Queue()
         self.queueout = queue.Queue()
         self.connect()
@@ -446,7 +447,7 @@ class App(Tk.Tk):
         self.entry_str = Tk.StringVar()
         self.entry_str.trace("w", self.entry_str_callback)
         self.entry = Tk.Entry(master=self.rootMIDDLE1, textvariable=self.entry_str, bg=COLOR_BG_CREAM, borderwidth = 0)
-        # self.entry.bind('<Key>', self.entry_callback)
+        self.entry.bind('<Key>', self.entry_callback)
         self.label_variable = Tk.Label(master=self.rootMIDDLE1, text="Enter Variable Keyword", bg = COLOR_BG, fg = COLOR_TEXT)
 
         # self.buttonOpenSubject.pack(side=Tk.LEFT)
@@ -501,7 +502,7 @@ class App(Tk.Tk):
         self.rect_playback = self.canvas2.create_rectangle(50,0,60,10, fill="black")
         # self.canvas2.pack(fill=Tk.X, expand=1)
         self.canvas2.grid(row=0,column=0, sticky='EW')
-        self.mainplot = MainPlot(self.container, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.rootdir+ "derived/timing.mat", self.destroymainplot, self.mainplot_axes_fun, self.queuein, self.offset_frame, self.loaded_variables)
+        self.mainplot = MainPlot(self.container, self.selected_files, self.rootdir + "derived/cevent_trials.mat", self.rootdir + "derived/timing.mat", self.destroymainplot, self.mainplot_axes_fun, self.queuein, self.offset_frame, self.loaded_variables)
         self.dr = Drag(self.rectinner, self.rectouter, self.canvas, self.mainplot)
 
         self.canvas.grid(row=2,column=0, sticky='EW')
@@ -528,16 +529,6 @@ class App(Tk.Tk):
 
     def raisewindows(self):
         self.queuein.put("raisewindows")
-
-    # def process_queue(self):
-    #     try:
-    #         msg = self.queue.get(0)
-    #         # Show result of the task if needed
-    #         self.rect_playback_pos(msg)
-    #     except queue.Empty:
-    #         pass
-    #     self.after(100, self.process_queue)
-
 
     def savelayout(self):
         layout = []
@@ -631,6 +622,18 @@ class App(Tk.Tk):
             except:
                 print("could not get info for this drive")
         return multiwork
+
+    def entry_callback(self, event):
+        if self.showing_variables:
+            if event.keysym == 'Return':
+                text = self.entry_str.get()
+                if os.path.exists(self.cur_subject + text):
+                    self.entry_str.set("")
+                    if text[-1] != "/":
+                        text = text + "/"
+                    self.working_dir = text
+                    self.update_filelist()
+                    self.insert_videos_and_favorites()
 
 
     def root_keypress(self, event):
@@ -740,6 +743,7 @@ class App(Tk.Tk):
 
     def insert_videos_and_favorites(self):
         self.listbox.delete(0,Tk.END)
+        self.listbox.insert(0, "< " + self.working_dir.upper() + " >")
         self.listbox.insert(Tk.END, "== VIDEOS ==")
         for v in self.videolist:
             self.listbox.insert(Tk.END, v)
@@ -753,12 +757,13 @@ class App(Tk.Tk):
             self.listbox.insert(Tk.END, i)
 
         self.showing_variables = True
+        self.scrollbary.config(to=len(self.files))
 
     def update_listbox(self, text):
         if self.showing_variables is False:
             self.insert_videos_and_favorites()
             self.showing_variables = True
-        self.listbox.delete(len(self.favorites) + len(self.videolist) + 3, Tk.END)
+        self.listbox.delete(len(self.favorites) + len(self.videolist) + 4, Tk.END)
         new_entries = self.search_files(text)
         for n in new_entries:
             self.listbox.insert(Tk.END, n)
@@ -779,11 +784,15 @@ class App(Tk.Tk):
                 if filename in self.videolist:
                     self.openvideo(self.rootdir + filename)
                 else:
-                    self.selected_files.append(self.rootdir + "derived/"+ filename)
+                    if idx[0] < (len(self.videolist) + len(self.favorites) + 4):
+                        working_dir = "derived/"
+                    else:
+                        working_dir = self.working_dir
+                    self.selected_files.append(self.rootdir + working_dir + filename)
                     if self.container is None:
                         self.initPlot()
                     else:
-                        self.mainplot.loaddata([self.rootdir + "derived/" + filename])
+                        self.mainplot.loaddata([self.rootdir + working_dir + filename])
             else:
                 subpath_str = self.listbox.get(idx)
                 subpath = self.construct_subpath_from_listbox(subpath_str)
@@ -862,15 +871,19 @@ class App(Tk.Tk):
             self.clearplot()
         self.opensubject(subpath)
 
+    def update_filelist(self):
+        self.files = os.listdir(self.rootdir+self.working_dir)
+
     def opensubject(self, subpath):
         # self.rootdir = "C:/users/sbf/Desktop/7001/"
         # self.rootdir = self.get_root_dir()
         self.layout = self.loadlayout()
         self.rootdir = subpath
+        self.working_dir = "derived/"
         if len(self.rootdir) is 0:
             return
         self.offset_frame = self.get_offset_frame(subpath)
-        self.files = os.listdir(self.rootdir+"derived")
+        self.update_filelist()
         setfiles = set(self.files)
         self.filtered_favorites = list(setfiles.intersection(self.favorites))
 
@@ -886,8 +899,6 @@ class App(Tk.Tk):
                         self.videolist.append(a + "/" + v)
 
         self.insert_videos_and_favorites()
-
-        self.scrollbary.config(to=len(self.files))
         self.cur_subject = subpath
 
     def destroymainplot(self, filename):
