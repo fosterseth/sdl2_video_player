@@ -41,7 +41,7 @@ sock.send("seekto 60.0".encode())
 
 - `open movie1.mp4 xscreen yscreen width height`
     - e.g. open c:/users/fosterseth/desktop/movie.mp4 100 100 640 480
-    - To default to native width and height of video, just put 0 for both width and height
+    - To use native width and height of video, just put 0 for both width and height
     
 - `seekto x`
     - x is in seconds
