@@ -1,1 +1,0 @@
-gcc -w -o "$1" "$1".c -I/usr/local/include -L/usr/local/lib -llibavcodec -llibavformat -llibavutil `sdl2-config --cflags --libs`
