@@ -6,7 +6,8 @@ In addition, the video playback can be controlled via TCP commands, e.g. "open m
 This allows for an easy interface to other applications - Python, Javascript, etc. -- anything that handle basic network sockets.
 
 ## Requirements to Compile
-I built this successfully with msys2 and the mingw64 gcc compiler on a Windows 10 machine.
+Originally built with msys2 and the mingw64 gcc compiler on a Windows 10 machine.
+
 msys2 packages:
 - mingw-w64-x86_64-ffmpeg 3.3-1
 - mingw-w64-x86_64-SDL2 2.0.5-1
