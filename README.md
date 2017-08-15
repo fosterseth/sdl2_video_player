@@ -24,17 +24,17 @@ ffmpeg supports a wide range of codecs and formats, so most videos should load f
 | Hotkey | Command |
 | ---    | --- |
 | Down | Seek 10 seconds forward |
-| Up | Seek 10 seconds back |
+| Up | Seek 10 seconds backward |
 | Right | Show next frame |
-| Left | Seek 0.25 seconds back |
+| Left | Seek 0.25 seconds backward |
 | Space | Toggle play/pause |
 
 ## TCP Control
 
-vidserv.c videos can be controlled via tcp commands.
+Videos can be opened and controlled via tcp commands.
 
-example in python, after setting up tcp connection to vidserv,
-    `sock.send("seekto 60.0".encode())`
+For example in Python, after setting up tcp connection to vidserv.exe,
+`sock.send("seekto 60.0".encode())`
 
 - `open movie1.mp4 xscreen yscreen width height`
     - e.g. open c:/users/fosterseth/desktop/movie.mp4 100 100 640 480
@@ -84,4 +84,4 @@ example in python, after setting up tcp connection to vidserv,
  
  
 ## Binaries
-For convenience I placed a .exe and the required DLL to run on a Windows machine.
+For convenience, the bin/ folder contains a compiled vidserv and the required DLL to run on a Windows machine.
