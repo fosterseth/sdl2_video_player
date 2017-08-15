@@ -16,7 +16,7 @@ msys2 packages:
 Everything is crossplatform except the socket programming code, read_from_client() method. The current source code has a winsock2 implementation, for Windows. It would be pretty easy to swap this out with linux socket programming.
 
 ## Basic Usage
-.\vidserv.c portnum movie1.mp4 movie2.mp4 ...
+####.\vidserv.c portnum movie1.mp4 movie2.mp4 ...
 
 If you don't specify a port number, it defaults with 50001, which should be open on most machines.
 
@@ -35,7 +35,9 @@ ffmpeg supports a wide range of codecs and formats, so most videos should load f
 Videos can be opened and controlled via tcp commands.
 
 For example in Python, after setting up tcp connection to vidserv.exe,
-`sock.send("seekto 60.0".encode())`
+```python
+sock.send("seekto 60.0".encode())
+```
 
 - `open movie1.mp4 xscreen yscreen width height`
     - e.g. open c:/users/fosterseth/desktop/movie.mp4 100 100 640 480
