@@ -22,63 +22,63 @@ If you don't specify a port number, it defaults with 50001, which should be open
 ffmpeg supports a wide range of codecs and formats, so most videos should load fine.
 
 Hotkeys:
-- <Down> Seek 10 seconds forward.
-- <Up> Seek 10 seconds back.
-- <Right> Show next frame.
-- <Left> Seek 0.25 seconds back.
-- <Space> Toggle play/pause.
+- __Down__  Seek 10 seconds forward.
+- __Up__     Seek 10 seconds back.
+- __Right__     Show next frame.
+- __Left__  Seek 0.25 seconds back.
+- __Space__     Toggle play/pause.
 
 ## TCP Control
 
 vidserv.c videos can be controlled via tcp commands.
 
 example in python, after setting up tcp connection to vidserv,
-    sock.send("seekto 60.0".encode())
+    `sock.send("seekto 60.0".encode())`
 
-- "open movie1.mp4 xscreen yscreen width height"
+- `open movie1.mp4 xscreen yscreen width height`
     -e.g. open c:/users/fosterseth/desktop/movie.mp4 100 100 640 480
     - To default to native width and height of video, just put 0 for both width and height
     
-- "seekto x"
+- `seekto x`
     - x is in seconds
  
-- "seek+"
+- `seek+`
     - seeks 60 seconds forward
     
-- "seek-"
+- `seek-`
     - seeks 60 seconds back
     
-- "seek+small"
+- `seek+small`
     - seeks to next frame
  
-- "seek-small"
+- `seek-small`
     - seeks back 0.25 seconds
     
-- "play"
+- `play`
 
-- "pause"
+- `pause`
 
-- "toggleplay"
+- `toggleplay`
     
-- "gettime"
+- `gettime`
     - a request for the current playback time, in seconds
     - client must call recv() to get the message back
 
-- "getnumvideos"
+- `getnumvideos`
     - a request for the number of active videos
     - client must call recv() to get message back
     
-- "getpos movie1.mp4"
+- `getpos movie1.mp4`
     - a request for the current x,y,w,h of movie1.mp4
     - client must call recv() to get message back
     
-- "raisewindow"
+- `raisewindow`
     - restores minimized windows
     
-- "closewindow"
+- `closewindow`
     - closes all windows, but keeps server running
     
-- "break"
+- `break`
     - closes all windows and quits the server
  
  
