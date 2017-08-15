@@ -16,7 +16,7 @@ msys2 packages:
 Everything is crossplatform except the socket programming code, read_from_client() method. The current source code has a winsock2 implementation, for Windows. It would be pretty easy to swap this out with linux socket programming.
 
 ## Basic Usage
-#### .\vidserv.c portnum movie1.mp4 movie2.mp4 ...
+#### vidserv.exe portnum movie1.mp4 movie2.mp4 ...
 
 If you don't specify a port number, it defaults with 50001, which should be open on most machines.
 
