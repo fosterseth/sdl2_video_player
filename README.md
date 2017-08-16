@@ -76,10 +76,10 @@ sock.send("seekto 60.0".encode())
     - a request for the current x,y,w,h of movie1.mp4
     - client must call recv() to get message back
     
-- `raisewindow`
+- `raisewindows`
     - restores minimized windows
     
-- `closewindow`
+- `closewindows`
     - closes all windows, but keeps server running
     
 - `break`
