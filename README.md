@@ -3,7 +3,7 @@
 ## Overview
 A lightweight video player built on the SDL2 and ffmpeg libraries. It can play multiple videos simultaneously, all synced to a master clock.
 In addition, the video playback can be controlled via TCP commands, e.g. "open movie.mp4", "play", "pause", "seekto 350.0", etc.
-This allows for an easy interface to other applications - Python, Javascript, etc. -- anything that handle basic network sockets.
+This allows for an easy interface to other applications - Python, Javascript, etc. -- anything that handles basic network sockets.
 
 ## Requirements to Compile
 Originally built with msys2 and the mingw64 gcc compiler on a Windows 10 machine.
