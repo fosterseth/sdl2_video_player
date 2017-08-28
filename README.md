@@ -12,6 +12,10 @@ msys2 packages:
 - mingw-w64-x86_64-ffmpeg 3.3-1
 - mingw-w64-x86_64-SDL2 2.0.5-1
 
+Here are my compiler options in CodeLite
+- preprocessor : main=SDL_main
+- libraries : mingw32;SDL2main;SDL2;avutil;swresample;avcodec;avformat;swscale;ws2_32
+
 ## Cross-platform note
 Everything is crossplatform except the socket programming code, read_from_client() method. The current source code has a winsock2 implementation, for Windows. It would be pretty easy to swap this out with linux socket programming.
 
