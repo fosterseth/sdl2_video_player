@@ -43,8 +43,8 @@ For example in Python, after setting up tcp connection to vidserv.exe,
 sock.send("seekto 60.0".encode())
 ```
 
-- `open movie1.mp4 xscreen yscreen width height`
-    - e.g. open c:/users/fosterseth/desktop/movie.mp4 100 100 640 480
+- `open movie1.mp4 xscreen yscreen width height windowname`
+    - e.g. open c:/users/fosterseth/desktop/movie.mp4 100 100 640 480 movie1
     - To use native width and height of video, just put 0 for both width and height
     
 - `seekto x`
@@ -92,3 +92,6 @@ sock.send("seekto 60.0".encode())
  
 ## Binaries
 For convenience, the bin/ folder contains a compiled vidserv and the required DLL to run on a Windows machine.
+
+## Credits
+dranger's tutorial was immensely helpful for this project. Check out [his tutorial](http://dranger.com/ffmpeg/ffmpeg.html) if you are new to AV processing.
