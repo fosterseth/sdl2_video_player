@@ -62,6 +62,7 @@ http://stackoverflow.com/questions/21007329/what-is-a-sdl-renderer/21007477#2100
 
 typedef struct VideoState {
     char src_filename[1024];
+    char windowname[1024];
     char printlog[1024];
     AVFormatContext *fmt_ctx;
     AVCodecContext *video_dec_ctx;
@@ -111,6 +112,7 @@ typedef struct VideoState {
 
 struct FileName {
     char filename[1024];
+    char windowname[1024];
     int xpos;
     int ypos;
     int width;
@@ -230,12 +232,15 @@ void read_from_client(){
                 char *pch2;
                 char *pch3;
                 char *pch4;
-                //movie.mp4 500 500 640 480
+                char *pch5;
+                //movie.mp4 500 500 640 480 windowname
                 pch1 = strchr(command, ' ');
                 pch2 = strchr(pch1+1, ' ');
                 pch3 = strchr(pch2+1,' ');
                 pch4 = strchr(pch3+1,' ');
+                pch5 = strchr(pch4+1,' ');
                 
+                char *windowname = pch5+1;
                 int h = atoi(pch4+1);
                 *pch4 = '\0';
                 int w = atoi(pch3+1);
@@ -248,6 +253,7 @@ void read_from_client(){
                 struct FileName *filename;
                 filename = av_mallocz(sizeof(struct FileName));
                 strcpy(filename->filename, command);
+                strcpy(filename->windowname, windowname);
                 filename->xpos = xpos;
                 filename->ypos = ypos;
                 filename->width = w;
@@ -417,7 +423,7 @@ int initiate_renderer_window(VideoState *vs, int xpos1, int ypos1, int width1, i
 
 	// create window
 	vs->Window = SDL_CreateWindow(
-			"MOVIE",
+			vs->windowname,
 			xpos1,
 			ypos1,
 			width1,
@@ -538,7 +544,7 @@ int displayFrame(VideoState *vs){
                 vs->current_video_secs = av_rescale_q(frame->pts, vs->video_stream->time_base, AV_TIME_BASE_Q);
                 
                 if (vs->sws_ctx == NULL){
-                    vs->sws_ctx = sws_getContext( vs->video_dec_ctx->width,  vs->video_dec_ctx->height, AV_PIX_FMT_YUV420P,
+                    vs->sws_ctx = sws_getContext( vs->video_dec_ctx->width,  vs->video_dec_ctx->height, vs->video_dec_ctx->pix_fmt,
                                                                   vs->window_width, vs->window_height, AV_PIX_FMT_YUV420P,
                                                                   SWS_BICUBIC, NULL, NULL, NULL);
                 }
@@ -690,6 +696,9 @@ void displayFrame_thread(VideoState *vs){
     //            SDL_PauseAudioDevice(dev, 0);
                 displayFrame(vs);
             }
+        } 
+        else {
+            SDL_RenderPresent(vs->Renderer);
         }
 	}
 }
@@ -704,7 +713,7 @@ void queueAudio_thread(VideoState *vs){
     }
 }
 
-int open_file(char filename[1024], int xpos1, int ypos1, int width, int height){
+int open_file(char filename[1024], char windowname[1024], int xpos1, int ypos1, int width, int height){
 
 //    char window_name[80];
     
@@ -712,6 +721,7 @@ int open_file(char filename[1024], int xpos1, int ypos1, int width, int height){
     vs = av_mallocz (sizeof(VideoState));
 
     av_strlcpy(vs->src_filename, filename, 1024);
+    av_strlcpy(vs->windowname, windowname, 1024);
 //    av_freep(&filename);
     vs->frame_total = 0;
 
@@ -792,7 +802,7 @@ void handleEvent(const SDL_Event *event){
     double seek_amount;
     if (event->type == userEventType){
         struct FileName *stru_filename = (struct FileName *) event->user.data1;
-        open_file(stru_filename->filename, stru_filename->xpos, stru_filename->ypos, stru_filename->width, stru_filename->height);
+        open_file(stru_filename->filename, stru_filename->windowname, stru_filename->xpos, stru_filename->ypos, stru_filename->width, stru_filename->height);
         av_freep(&stru_filename);
     }
 	if (event->type == SDL_KEYDOWN){
@@ -1032,7 +1042,7 @@ int main(int argc, char *argv[]){
     for (v=2; v<argc; v++){
         char filename[1024];
         strcpy(filename, argv[v]);
-        open_file(filename, x_pos, y_pos, 0, 0);
+        open_file(filename, "MOVIE", x_pos, y_pos, 0, 0);
         x_pos += 50;
         y_pos += 50;
     }
